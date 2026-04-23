@@ -220,11 +220,75 @@ always returns `time`. Downstream `.sel(valid_time=...)` must be rewritten as
 
 ---
 
-## Phase 3+ import map (to be filled in as phases land)
+## Phase 3 — circulation (available now)
+
+All Walker/Hadley primitives were extracted verbatim from the E3SMS `_v2`
+scripts and now live in `apinter.circulation`. The scripts themselves (that
+combined loading + science + plotting) will be deleted in phase 5; the
+primitives below are all that's portable.
+
+### Helmholtz decomposition
+
+| Legacy (defined inline in many E3SMS `plot_*.py` files) | New canonical |
+|---|---|
+| `get_divergent_u(u_clim, v_clim)` | `apinter.circulation.get_divergent_u` |
+| `get_divergent_v(u_clim, v_clim)` | `apinter.circulation.get_divergent_v` |
+| `compute_velpot(u_clim, v_clim)` | `apinter.circulation.compute_velpot` |
+
+All three now handle NaN input cleanly (fill with zonal mean for the
+transform, restore NaN on output).
+
+### Walker stream function
+
+| Legacy (`plot_walker_streamfunction_v2.py`) | New canonical |
+|---|---|
+| `calc_walker_sf(ud_eq, plev_hpa)` | `apinter.circulation.calc_walker_sf(ud_eq, plev_hpa, phi0_deg=0.0)` |
+| `omega_to_streamfunction(omega, lon, plev)` (from `plot_walker_circulation.py`) | `apinter.circulation.omega_to_streamfunction(omega, lon, plev_hpa, phi0_deg=0, band_half_width_deg=5)` |
+
+Output units unchanged: 10^11 kg/s (u-based) or 10^10 kg/s (ω-based).
+
+### Hadley stream function
+
+| Legacy (`plot_hadley_cell_v2.py`) | New canonical |
+|---|---|
+| `calc_streamfunction(vd_sector, lat, plev_pa)` (hardcoded Atlantic LON_W/LON_E) | `apinter.circulation.calc_streamfunction(vd_sector, lat, plev_pa, lon_w, lon_e)` — sector is now a parameter, so the same call covers Atlantic, Pacific, or any user-chosen box |
+| `calc_streamfunction_global(v_mean, lat, plev_pa)` (from `plot_hadley_cell_global.py`) | `apinter.circulation.calc_streamfunction_global(v_mean, lat, plev_pa)` |
+
+### Common-grid interpolation (for multi-model mean)
+
+| Legacy | New canonical |
+|---|---|
+| `interp_to_common(data, lon, plev, ...)` in Walker scripts (cyclic-lon wrap) | `apinter.circulation.interp_to_common_lon` |
+| `interp_to_common(psi, lat, plev, ...)` in Hadley scripts (no wrap) | `apinter.circulation.interp_to_common_lat` |
+
+The two were same-named but behaved differently; now they have distinct names.
+
+### Li et al. (2006) ψ/φ solver
+
+| Legacy (`Paper_1/src/psi_phi.py`) | New canonical |
+|---|---|
+| `psi_lietal`, `ja`, `grad_ja`, `derive_ax`, `derive_adj`, `v_zonal_integration`, `v_meridional_integration`, `dx_from_dlon`, `dy_from_dlat`, `periodify`, `integ`, `uv2psiphi` | `from apinter.circulation.psi_phi import <same_name>` — submodule port, no API change |
+
+### Dropped (not ported)
+
+The following pieces of the E3SMS circulation scripts were intentionally
+NOT ported:
+
+| Dropped | Why |
+|---|---|
+| `load_era5() / load_e3sm() / load_cmip6()` defined inside every `plot_*.py` | Replaced by generic `apinter.io.load_era5` / `load_cmip6` / direct E3SM paths in `apinter.config` |
+| `plot_walker() / plot_psi() / plot_panel() / prep_data()` | Figure layout is notebook-specific; scripts will inline or own them |
+| `ep_mean_at_500`, `wep_mean_at_500`, `region_mean_at_500`, `both_regions` | One-liners on the ψ array (`np.nanmean(psi[k, mask])`); per-script where used |
+| `load_ocean_mask / zonal_mean_profile / compute_profiles_for_region` from `calc_meridional_profiles.py` | Narrow to that script; not reused elsewhere |
+
+If any of these turn out to be reused across folders during phase-5
+migration, they can be promoted back into the package then.
+
+---
+
+## Phase 4 import map (to be filled in as phases land)
 
 | Legacy name | New location | Phase |
 |---|---|---|
-| `calc_walker_sf`, `get_divergent_u`, `calc_streamfunction`, `compute_velpot`, `interp_to_common` | `apinter.circulation.*` | 3 |
-| `psi_lietal` (Li et al. 2006) | `apinter.circulation.psi_phi` | 3 |
 | `Paper_1/src/omega_reg_plotting` | `apinter.plotting.omega_regression` | 4 |
 | `./src/plot/plot_index`, `plot_regression_map`, `plot_trend_map` | `apinter.plotting.*` | 4 |

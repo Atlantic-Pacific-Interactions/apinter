@@ -348,6 +348,104 @@ trend_per_decade = spatial_trend(sst, trend_period=120)
 
 ---
 
+## Circulation
+
+### Walker stream function (longitude × pressure)
+
+Two constructions. Pick whichever matches your inputs.
+
+From equatorial divergent U (Helmholtz-decomposed winds):
+
+```python
+from apinter.io import load_era5
+from apinter.circulation import get_divergent_u, calc_walker_sf
+
+# Per pressure level, compute divergent U on a global grid, then
+# average to a 5°S–5°N equatorial band.
+ud_levels = []
+for lev in [100, 200, 300, 500, 700, 850, 925, 1000]:
+    u = load_era5('u', level=lev, sim_time=slice('1958', '2014')).mean('time')
+    v = load_era5('v', level=lev, sim_time=slice('1958', '2014')).mean('time')
+    ud = get_divergent_u(u, v)                       # np.ndarray (lat, lon)
+    ud_eq = np.nanmean(ud[(u.lat >= -5) & (u.lat <= 5), :], axis=0)
+    ud_levels.append(ud_eq)
+
+ud_eq = np.stack(ud_levels)                          # (nlev, nlon)
+psi = calc_walker_sf(ud_eq, plev_hpa=np.array([100, 200, 300, 500, 700, 850, 925, 1000]))
+# psi in units of 10^11 kg/s
+```
+
+Alternative — from ω integrated zonally (older method):
+
+```python
+from apinter.circulation import omega_to_streamfunction
+
+omega = ...              # (nlev, nlon), Pa/s, already equatorial-band-averaged
+psi = omega_to_streamfunction(omega, lon=..., plev_hpa=...,
+                              phi0_deg=0.0, band_half_width_deg=5.0)
+# psi in units of 10^10 kg/s
+```
+
+### Hadley stream function (latitude × pressure)
+
+Regional sector (e.g. Atlantic 280°–360°E):
+
+```python
+from apinter.circulation import get_divergent_v, calc_streamfunction
+
+vd_sector = ...              # (nlev, nlat) divergent V averaged over lon_w..lon_e, m/s
+psi = calc_streamfunction(vd_sector, lat=..., plev_pa=...,
+                          lon_w=280, lon_e=360)
+# psi in units of 10^10 kg/s
+```
+
+Global zonal-mean:
+
+```python
+from apinter.circulation import calc_streamfunction_global
+
+v_mean = v.mean('lon').mean('time').values        # (nlev, nlat)
+psi = calc_streamfunction_global(v_mean, lat=..., plev_pa=...)
+```
+
+### Velocity potential (200 hPa overlay)
+
+```python
+from apinter.circulation import compute_velpot
+
+u200 = load_era5('u', level=200, sim_time=slice('1958','2014')).mean('time')
+v200 = load_era5('v', level=200, sim_time=slice('1958','2014')).mean('time')
+chi, u_div, v_div = compute_velpot(u200, v200)
+```
+
+### Multi-model mean on a common grid
+
+`interp_to_common_lon` / `interp_to_common_lat` put each model's ψ onto the
+canonical pressure × longitude (or × latitude) grid so they can be averaged:
+
+```python
+from apinter.circulation import interp_to_common_lon
+from apinter.config import COMMON_LON, COMMON_PLEV
+
+psi_common = interp_to_common_lon(psi_model, lon=model_lon, plev_hpa=model_plev)
+# psi_common is on (COMMON_PLEV, COMMON_LON) — averageable across models
+```
+
+### Li et al. (2006) ψ/φ minimization solver (Paper_1)
+
+For non-rectangular domains with complex coastlines. Different algorithm from
+the windspharm-based Helmholtz decomposition — minimizes an L² functional.
+
+```python
+from apinter.circulation.psi_phi import uv2psiphi
+
+psi, phi = uv2psiphi(LON, LAT, U, V,
+                     ZBC='closed', MBC='closed',
+                     ALPHA=1.0e-14, fac=111195, period=False)
+```
+
+---
+
 ## Significance
 
 ```python
