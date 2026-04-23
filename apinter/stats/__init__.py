@@ -1,11 +1,12 @@
 """Statistics: trends, regression, correlation, significance.
 
-Canonical regression entry point: `regression_lags` — simple or partial
-(with a confounder), concurrent or multi-lag, with Bretherton-effective-DoF
-significance. Use it for all field-on-index regression.
-
-For 1D-on-1D lead-lag correlation between two time series, use
-`calculate_correlation` / `calculate_multi_model_mean_correlation`.
+Regression and correlation entry points:
+  - regression_lags(field, target_index, lags, confounder=None, ...):
+      field-on-index regression (simple or partial), concurrent or multi-lag.
+  - correlation_lags(ts1, ts2, max_lag=12):
+      1D-on-1D lead-lag Pearson correlation (no internal time selection).
+  - mmm_correlation_lags(per_model_results, exclude=None):
+      multi-model mean of per-model correlation_lags results.
 """
 from .trends import (
     global_mean_trend,
@@ -18,9 +19,8 @@ from .trends import (
 )
 from .regression import (
     regression_lags,
-    calculate_regression_vectorize,
-    calculate_correlation,
-    calculate_multi_model_mean_correlation,
+    correlation_lags,
+    mmm_correlation_lags,
 )
 from .significance import (
     autocorrelation_function,
@@ -38,11 +38,10 @@ __all__ = [
     "assign_season",
     "seasonal_trend",
     "all_seasonal_trends",
-    # regression + correlation (all field/time-series regression lives here)
+    # regression + correlation
     "regression_lags",
-    "calculate_regression_vectorize",
-    "calculate_correlation",
-    "calculate_multi_model_mean_correlation",
+    "correlation_lags",
+    "mmm_correlation_lags",
     # significance
     "autocorrelation_function",
     "effective_degrees_of_freedom",

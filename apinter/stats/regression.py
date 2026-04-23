@@ -4,7 +4,7 @@ Canonical entry point: `regression_lags` — handles simple or partial regressio
 one or many lags with effective-DoF significance (Bretherton integral time scale).
 """
 import logging
-from typing import Dict, Iterable, Optional, Tuple
+from typing import Dict, Iterable, Optional
 
 import numpy as np
 import xarray as xr
@@ -185,158 +185,97 @@ def regression_lags(
     return xr.Dataset(ds_vars, coords=coords)
 
 
-def _linear_regression(x: np.ndarray, y: np.ndarray) -> tuple:
+def correlation_lags(ts1: xr.DataArray,
+                     ts2: xr.DataArray,
+                     max_lag: int = 12) -> xr.Dataset:
     """
-    Linear regression between 1D x and y arrays (module-level for picklability).
+    Lead-lag Pearson correlation between two 1D time series.
 
-    Returns (slope, intercept, r_value, p_value, std_err), NaN if < 3 valid points.
-    """
-    valid_mask = ~(np.isnan(x) | np.isnan(y))
-    if valid_mask.sum() < 3:
-        return np.nan, np.nan, np.nan, np.nan, np.nan
+    For each lag k in [-max_lag, +max_lag] (time steps), computes
+    corr(ts1, ts2 shifted by k).
+      lag < 0: ts2 leads ts1 by |lag| steps
+      lag > 0: ts1 leads ts2 by lag steps
+      lag = 0: concurrent
 
-    x_valid = x[valid_mask]
-    y_valid = y[valid_mask]
-
-    try:
-        slope, intercept, r_value, p_value, std_err = stats.linregress(x_valid, y_valid)
-        return slope, intercept, r_value, p_value, std_err
-    except Exception as e:
-        logger.warning(f"Regression failed: {e}")
-        return np.nan, np.nan, np.nan, np.nan, np.nan
-
-
-def calculate_regression_vectorize(index: xr.DataArray,
-                                   gridded_data: xr.DataArray,
-                                   coord_name: str = 'time',
-                                   align_time: bool = True) -> xr.Dataset:
-    """
-    Vectorized grid-point linear regression between a 1D index and gridded data.
-
-    Returns a Dataset with: slope, intercept, r_value, p_value, std_err.
-    r_value is identical to scipy.stats.pearsonr.
-    """
-    logger.info("Starting vectorized regression calculation")
-    logger.info(f"Index shape: {index.shape}, gridded shape: {gridded_data.shape}")
-
-    if align_time:
-        index[coord_name] = gridded_data[coord_name]
-        index, gridded_data = xr.align(index, gridded_data, join='inner', copy=False)
-        logger.info(f"Aligned index shape: {index.shape}, gridded: {gridded_data.shape}")
-
-    index_nan_count = np.isnan(index.values).sum()
-    gridded_nan_count = np.isnan(gridded_data.values).sum()
-    if index_nan_count > 0:
-        logger.warning(f"Index contains {index_nan_count} NaN values")
-    if gridded_nan_count > 0:
-        logger.warning(f"Gridded data contains {gridded_nan_count} NaN values")
-
-    regression_results = xr.apply_ufunc(
-        _linear_regression,
-        index,
-        gridded_data,
-        input_core_dims=[[coord_name], [coord_name]],
-        output_core_dims=[[], [], [], [], []],
-        vectorize=True,
-        dask='parallelized',
-        output_dtypes=[float, float, float, float, float],
-        dask_gufunc_kwargs={'allow_rechunk': True},
-    )
-
-    regression_ds = xr.Dataset({
-        'slope': regression_results[0],
-        'intercept': regression_results[1],
-        'r_value': regression_results[2],
-        'p_value': regression_results[3],
-        'std_err': regression_results[4],
-    })
-
-    regression_ds.attrs.update({
-        'description': 'Linear regression statistics between index and gridded data',
-        'index_name': index.name or 'index',
-        'gridded_data_name': gridded_data.name or 'gridded_data',
-        'coordinate_name': coord_name,
-        'method': 'scipy.stats.linregress',
-    })
-
-    regression_ds['slope'].attrs.update({'long_name': 'Regression slope'})
-    regression_ds['intercept'].attrs.update({'long_name': 'Regression intercept'})
-    regression_ds['r_value'].attrs.update({'long_name': 'Pearson correlation coefficient'})
-    regression_ds['p_value'].attrs.update({'long_name': 'Two-tailed p-value'})
-    regression_ds['std_err'].attrs.update({'long_name': 'Standard error of slope'})
-
-    return regression_ds.compute().copy()
-
-
-def calculate_correlation(model_name: str,
-                          ds1: Dict, ds2: Dict,
-                          shift_time: int = 12,
-                          data_type: str = 'hpf_data') -> Tuple[Dict, Dict]:
-    """
-    Lead-lag correlation between two model time series at monthly lags
-    from -shift_time to +shift_time. Series are selected over 1955-2009.
+    The caller is responsible for slicing ts1 and ts2 to the desired time
+    window before calling. The function does not apply any internal
+    time-range selection.
 
     Parameters
     ----------
-    model_name : str
-    ds1, ds2 : nested dicts {data_type: {model_name: DataArray}}
-        ds1 is unshifted (e.g. NTA/AMO); ds2 is shifted (e.g. CTI).
-    shift_time : int
-        Max lag in months.
-    data_type : str
-        Key into ds1/ds2 (e.g. 'hpf_data', 'lpf_data').
+    ts1, ts2 : xr.DataArray
+        1D time series sharing the 'time' dimension. Must already be
+        aligned; otherwise an inner join is applied.
+    max_lag : int
+        Maximum absolute lag in time-step units (months for monthly data).
 
     Returns
     -------
-    (r_values, p_values) : dict keyed by lag in months.
+    xr.Dataset with coord `lag` (length 2*max_lag+1) and variables `r`,
+    `p_value` (two-sided scipy.stats.linregress).
     """
-    r_values: Dict = {}
-    p_values: Dict = {}
+    ts1, ts2 = xr.align(ts1, ts2, join='inner')
+    n = ts1.sizes['time']
+    if n < 2 * max_lag + 3:
+        raise ValueError(
+            f"Overlap length {n} too short for max_lag={max_lag}."
+        )
 
-    time_slice = slice('1955', '2009')
-    nta_data_ds = ds1[data_type][model_name].sel(time=time_slice)
-    cti_data_ds = ds2[data_type][model_name].sel(time=time_slice)
-    nta_data_ds = nta_data_ds.isel(time=slice(shift_time, -shift_time))
+    x = ts1.isel(time=slice(max_lag, n - max_lag)).values
+    y = ts2.values
 
-    for i in range(0, 2 * shift_time + 1):
-        if i < 2 * shift_time:
-            cti_shifted = cti_data_ds.isel(time=slice(i, -2 * shift_time + i))
-        else:
-            cti_shifted = cti_data_ds.isel(time=slice(i, None))
+    lags = np.arange(-max_lag, max_lag + 1)
+    r_vals = np.empty(lags.size, dtype=float)
+    p_vals = np.empty(lags.size, dtype=float)
 
-        _, _, r_value, p_value, _ = stats.linregress(nta_data_ds.values,
-                                                     cti_shifted.values)
-        lag = i - shift_time
-        r_values[lag] = r_value
-        p_values[lag] = p_value
+    for i, lag in enumerate(lags):
+        start = max_lag + lag
+        y_shifted = y[start:start + x.size]
+        _, _, r, p, _ = stats.linregress(x, y_shifted)
+        r_vals[i] = r
+        p_vals[i] = p
 
-    return r_values, p_values
+    return xr.Dataset(
+        {'r': (['lag'], r_vals), 'p_value': (['lag'], p_vals)},
+        coords={'lag': lags},
+    )
 
 
-def calculate_multi_model_mean_correlation(models,
-                                           results: Dict,
-                                           shift_time: int = 12,
-                                           data_type: str = 'hpf_data'):
+def mmm_correlation_lags(per_model_results: Dict[str, xr.Dataset],
+                         exclude: Optional[Iterable[str]] = None
+                         ) -> xr.Dataset:
     """
-    Multi-model mean of lead-lag correlation, excluding observational/E3SM runs.
+    Multi-model-mean of per-model correlation_lags Datasets.
 
-    Excludes models in {'HadISST', 'ERSST', 'E3SM-MMF', 'E3SMv2'}.
+    Parameters
+    ----------
+    per_model_results : {model_name: correlation_lags Dataset}
+        Each value is a Dataset from correlation_lags (dims: lag; vars: r, p_value).
+    exclude : iterable of model names, optional
+        Models to skip (e.g., observational datasets). Default: include all.
 
-    Returns (r_mean, p_mean, std_err) each keyed by lag.
+    Returns
+    -------
+    xr.Dataset with `lag` coord and variables:
+        r_mean, r_std, p_mean, n_models
     """
-    r_values: Dict = {i: [] for i in range(-shift_time, shift_time + 1)}
-    p_values: Dict = {i: [] for i in range(-shift_time, shift_time + 1)}
+    exclude = set(exclude or [])
+    included = [name for name in per_model_results if name not in exclude]
+    if not included:
+        raise ValueError("No models left after applying exclude list.")
 
-    exclude = {'HadISST', 'ERSST', 'E3SM-MMF', 'E3SMv2'}
-    for model in models:
-        if model in exclude:
-            continue
-        for i in range(-shift_time, shift_time + 1):
-            r_values[i].append(results[model][0][i])
-            p_values[i].append(results[model][1][i])
+    stacked_r = xr.concat(
+        [per_model_results[name]['r'] for name in included],
+        dim=xr.DataArray(included, dims='model', name='model'),
+    )
+    stacked_p = xr.concat(
+        [per_model_results[name]['p_value'] for name in included],
+        dim=xr.DataArray(included, dims='model', name='model'),
+    )
 
-    r_mean = {i: np.mean(r_values[i]) for i in range(-shift_time, shift_time + 1)}
-    p_mean = {i: np.mean(p_values[i]) for i in range(-shift_time, shift_time + 1)}
-    std_err = {i: np.std(r_values[i]) for i in range(-shift_time, shift_time + 1)}
-
-    return r_mean, p_mean, std_err
+    return xr.Dataset({
+        'r_mean': stacked_r.mean('model'),
+        'r_std': stacked_r.std('model'),
+        'p_mean': stacked_p.mean('model'),
+        'n_models': xr.DataArray(len(included)),
+    })

@@ -127,17 +127,39 @@ def test_seasonal_trend_matches_legacy(field_2d):
                                old(field_2d, 'DJF').values, rtol=1e-12)
 
 
-# ---------- Stats: regression / significance ----------
+# ---------- Stats: correlation / significance ----------
 
-def test_linear_regression_vectorize_matches_legacy(ts_1d, field_2d):
-    from apinter.stats import calculate_regression_vectorize as new
-    from calculate_regression_vectorize import calculate_regression_vectorize as old
-    # Align time coords
-    index = ts_1d.isel(time=slice(0, field_2d.sizes["time"]))
-    new_ds = new(index, field_2d)
-    old_ds = old(index, field_2d)
-    for v in ["slope", "intercept", "r_value", "p_value", "std_err"]:
-        np.testing.assert_allclose(new_ds[v].values, old_ds[v].values, rtol=1e-10)
+def test_correlation_lags_basic(ts_1d):
+    """correlation_lags returns r=1.0 at lag=0 when comparing a series to itself."""
+    from apinter.stats import correlation_lags
+    ds = correlation_lags(ts_1d, ts_1d, max_lag=12)
+    assert list(ds.dims) == ['lag']
+    assert ds.sizes['lag'] == 25
+    np.testing.assert_allclose(ds['r'].sel(lag=0).item(), 1.0, atol=1e-12)
+
+
+def test_correlation_lags_respects_caller_time_slicing(ts_1d):
+    """correlation_lags does no internal time slicing; caller controls the window."""
+    from apinter.stats import correlation_lags
+    # Pre-slice to a sub-window; correlation should still be computed on the slice.
+    sub = ts_1d.isel(time=slice(100, 300))
+    ds = correlation_lags(sub, sub, max_lag=6)
+    np.testing.assert_allclose(ds['r'].sel(lag=0).item(), 1.0, atol=1e-12)
+
+
+def test_mmm_correlation_lags(ts_1d):
+    """Multi-model mean over a dict of correlation_lags results; exclude respected."""
+    from apinter.stats import correlation_lags, mmm_correlation_lags
+    rng = np.random.default_rng(11)
+    per_model = {
+        'M1': correlation_lags(ts_1d, ts_1d + rng.standard_normal(ts_1d.size) * 0.1, max_lag=6),
+        'M2': correlation_lags(ts_1d, ts_1d + rng.standard_normal(ts_1d.size) * 0.2, max_lag=6),
+        'OBS': correlation_lags(ts_1d, ts_1d + rng.standard_normal(ts_1d.size) * 0.3, max_lag=6),
+    }
+    mmm = mmm_correlation_lags(per_model, exclude=['OBS'])
+    assert int(mmm['n_models']) == 2
+    # lag=0 r_mean should be close to 1 (M1 and M2 are near-identical to ts_1d)
+    assert mmm['r_mean'].sel(lag=0).item() > 0.9
 
 
 def test_effective_dof_matches_legacy(ts_1d):
