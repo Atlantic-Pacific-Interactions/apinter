@@ -154,6 +154,63 @@ def test_autocorrelation_matches_legacy(ts_1d):
     np.testing.assert_allclose(new(ts_1d, 24), old(ts_1d, 24), rtol=1e-12)
 
 
+# ---------- regression_lags: canonical regression entry point ----------
+
+def test_regression_lags_concurrent_matches_lstsq(ts_1d, field_2d):
+    """regression_lags(lags=[0]) returns the OLS slope per grid point."""
+    from apinter.stats import regression_lags
+    index = ts_1d.isel(time=slice(0, field_2d.sizes["time"]))
+    ds = regression_lags(field_2d, index, lags=[0], compute_significance=False)
+    # Hand-computed lstsq slope at each grid point
+    y = field_2d.values.reshape(field_2d.shape[0], -1)
+    X = np.column_stack([index.values, np.ones(len(index))])
+    b, *_ = np.linalg.lstsq(X, y, rcond=None)
+    expected = b[0].reshape(field_2d.shape[1:])
+    np.testing.assert_allclose(ds['beta'].isel(lag=0).values, expected, rtol=1e-12)
+
+
+def test_regression_lags_shapes_and_coords(ts_1d, field_2d):
+    """Output Dataset has the expected lag dim, spatial dims, and variables."""
+    from apinter.stats import regression_lags
+    index = ts_1d.isel(time=slice(0, field_2d.sizes["time"]))
+    lags = [-24, 0, 12]
+    ds = regression_lags(field_2d, index, lags=lags, compute_significance=True)
+    assert list(ds.dims) == ['lag', 'lat', 'lon']
+    assert list(ds['lag'].values) == lags
+    assert set(ds.data_vars) == {'beta', 'p_value'}
+    assert ds['p_value'].min() >= 0 and ds['p_value'].max() <= 1
+
+
+def test_regression_lags_partial_with_confounder(ts_1d, field_2d):
+    """With a confounder, output has target_beta and confounder_beta."""
+    from apinter.stats import regression_lags
+    index = ts_1d.isel(time=slice(0, field_2d.sizes["time"]))
+    rng = np.random.default_rng(7)
+    conf = index + rng.standard_normal(index.size) * 0.3
+    conf = conf.rename('conf')
+    ds = regression_lags(field_2d, index, lags=[-12, 0, 12], confounder=conf,
+                         compute_significance=True)
+    assert set(ds.data_vars) == {'target_beta', 'confounder_beta',
+                                  'target_pval', 'confounder_pval'}
+
+
+def test_partial_shim_delegates_to_regression_lags(ts_1d, field_2d):
+    """Legacy shim returns the same coefficients as regression_lags."""
+    from apinter.stats import calculate_partial_lead_lag_regression, regression_lags
+    rng = np.random.default_rng(3)
+    index1 = ts_1d.isel(time=slice(0, field_2d.sizes["time"]))
+    index2 = index1 + rng.standard_normal(index1.size) * 0.2
+    index2 = index2.rename('ts2')
+    max_lag_years = 2
+    shim = calculate_partial_lead_lag_regression(index1, index2, field_2d,
+                                                 max_lag_years=max_lag_years)
+    lags = list(np.arange(-max_lag_years, max_lag_years + 1) * 12)
+    ds = regression_lags(field_2d, index1, lags=lags, confounder=index2,
+                         compute_significance=False)
+    np.testing.assert_allclose(shim['tamv_beta'], ds['target_beta'].values, rtol=1e-12)
+    np.testing.assert_allclose(shim['tpdv_beta'], ds['confounder_beta'].values, rtol=1e-12)
+
+
 # ---------- Indices ----------
 
 def test_calculate_index_matches_paper1_canonical(field_2d):

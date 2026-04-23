@@ -93,53 +93,37 @@ def calculate_lead_lag_regression(index_data: xr.DataArray,
 def calculate_partial_lead_lag_regression(ts1: xr.DataArray,
                                           ts2: xr.DataArray,
                                           field: xr.DataArray,
-                                          max_lag_years: int = 15) -> Dict[str, Any]:
+                                          max_lag_years: int = 15,
+                                          compute_significance: bool = False) -> Dict[str, Any]:
     """
     Partial lead-lag regression of `field` on two predictor time series (ts1, ts2).
 
-    Auto-detects spatial dims — works for 2D (lat, lon) and 3D (level, lat, lon) fields.
+    Legacy-compatible shim: delegates to apinter.stats.regression.regression_lags
+    and returns a dict in the old format (lags, tamv_beta, tpdv_beta, coords).
+    Passing compute_significance=True also adds tamv_pval, tpdv_pval.
 
-    Returns dict with lags (months), tamv_beta (ts1 coeff), tpdv_beta (ts2 coeff),
-    and per-dim coordinate arrays.
+    Prefer regression_lags(field, ts1, confounder=ts2, lags=...) directly for new code.
     """
-    ts1, ts2, field = xr.align(ts1, ts2, field, join='inner')
-
-    start_date = str(field.time.min().values)
-    end_date = str(field.time.max().values)
-    logging.info(f"Alignment complete. Processing time range: {start_date} to {end_date}")
-    logging.info(f"Total time steps: {len(field.time)}")
-
-    spatial_dims = [d for d in field.dims if d != 'time']
-    spatial_shape = [field.sizes[d] for d in spatial_dims]
+    from .regression import regression_lags
 
     if len(field.time) <= max_lag_years * 12:
         raise ValueError(f"Time series is too short for a {max_lag_years} year lag.")
 
     lags = np.arange(-max_lag_years, max_lag_years + 1) * 12
+    ds = regression_lags(field, ts1, lags=list(lags), confounder=ts2,
+                         compute_significance=compute_significance)
+    if ds is None:
+        raise RuntimeError("regression_lags returned None (overlap too short).")
 
-    res_beta1 = np.zeros((len(lags), *spatial_shape))
-    res_beta2 = np.zeros((len(lags), *spatial_shape))
+    spatial_dims = [d for d in field.dims if d != 'time']
 
-    for i, lag in enumerate(lags):
-        if lag < 0:
-            y = field.values[-lag:]
-            x1, x2 = ts1.values[:lag], ts2.values[:lag]
-        elif lag > 0:
-            y = field.values[:-lag]
-            x1, x2 = ts1.values[lag:], ts2.values[lag:]
-        else:
-            y, x1, x2 = field.values, ts1.values, ts2.values
-
-        X = np.column_stack([x1, x2, np.ones(len(x1))])
-        y_flat = y.reshape(y.shape[0], -1)
-        beta = np.linalg.lstsq(X, y_flat, rcond=None)[0]
-
-        res_beta1[i] = beta[0].reshape(spatial_shape)
-        res_beta2[i] = beta[1].reshape(spatial_shape)
-
-    return {
+    out: Dict[str, Any] = {
         'lags': lags,
-        'tamv_beta': res_beta1,
-        'tpdv_beta': res_beta2,
+        'tamv_beta': ds['target_beta'].values,
+        'tpdv_beta': ds['confounder_beta'].values,
         'coords': {d: field[d].values for d in spatial_dims},
     }
+    if compute_significance:
+        out['tamv_pval'] = ds['target_pval'].values
+        out['tpdv_pval'] = ds['confounder_pval'].values
+    return out

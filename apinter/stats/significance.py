@@ -1,4 +1,12 @@
-"""Autocorrelation and effective degrees of freedom (Pyper & Peterman 1998)."""
+"""Autocorrelation and effective degrees of freedom.
+
+Two families:
+  - Scalar (Pyper & Peterman 1998): autocorrelation_function + effective_degrees_of_freedom.
+    Used for significance of point-wise or time-series correlations.
+  - Vectorized (Bretherton et al. 1999 integral time scale):
+    autocorrelation_numpy_vectorized + calculate_neff_vectorized. Used by
+    regression_lags for spatial-map significance.
+"""
 import numpy as np
 import xarray as xr
 
@@ -71,4 +79,69 @@ def effective_degrees_of_freedom(data1: xr.DataArray, data2: xr.DataArray) -> fl
     else:
         ne = np.nan
 
+    return ne
+
+
+def autocorrelation_numpy_vectorized(data: np.ndarray, max_lag: int) -> np.ndarray:
+    """
+    Vectorized autocorrelation function (ACF) for (time, space) arrays.
+
+    Input: np.ndarray of shape (time,) or (time, space).
+    Output: np.ndarray of shape (max_lag+1, space). ACF at lag 0 is 1.0;
+    NaN where variance is zero.
+    """
+    if data.ndim == 1:
+        data = data.reshape(-1, 1)
+
+    data_mean = np.mean(data, axis=0)
+    data_centered = data - data_mean
+    var = np.sum(data_centered ** 2, axis=0)
+
+    var = np.where(var == 0, np.nan, var)
+
+    acf = np.zeros((max_lag + 1, data.shape[1]))
+    acf[0, :] = 1.0
+
+    for lag in range(1, max_lag + 1):
+        cov = np.sum(data_centered[:-lag] * data_centered[lag:], axis=0)
+        with np.errstate(divide='ignore', invalid='ignore'):
+            acf[lag, :] = cov / var
+    return acf
+
+
+def calculate_neff_vectorized(x_series: np.ndarray,
+                              y_field: np.ndarray,
+                              max_lag_cap: int = 60) -> np.ndarray:
+    """
+    Vectorized effective sample size (Bretherton et al. 1999 integral time scale).
+
+    1/Ne = 1/N + (2/N) Σ_{j=1..L} (N-j)/N * rho_xx(j) * rho_yy(j)
+
+    Inputs
+    ------
+    x_series : (time,) 1D array (predictor).
+    y_field  : (time, space) 2D array (response, flattened spatial).
+    max_lag_cap : int, cap on summation range for memory efficiency (default 60).
+
+    Returns
+    -------
+    Ne : (space,) array, clipped to [2, N]. NaN where variance is zero.
+    """
+    n = len(x_series)
+    if n < 3:
+        return np.full(y_field.shape[1], np.nan)
+
+    x_in = x_series.reshape(-1, 1)
+    max_lag = min(n - 2, max_lag_cap)
+
+    rho_xx = autocorrelation_numpy_vectorized(x_in, max_lag)
+    rho_yy = autocorrelation_numpy_vectorized(y_field, max_lag)
+
+    sum_term = np.zeros(y_field.shape[1])
+    for j in range(1, max_lag + 1):
+        sum_term += (n - j) / n * rho_xx[j, 0] * rho_yy[j, :]
+
+    inv_ne = (1.0 / n) + (2.0 / n) * sum_term
+    with np.errstate(divide='ignore', invalid='ignore'):
+        ne = np.clip(1.0 / inv_ne, 2.0, float(n))
     return ne
