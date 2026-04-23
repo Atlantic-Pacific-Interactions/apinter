@@ -1,4 +1,5 @@
-"""Phase-3 tests: apinter.circulation primitives.
+"""Tests for apinter.circulation — Walker/Hadley streamfunction, Helmholtz,
+regrid, Li-2006 ψ/φ solver.
 
 Uses small synthetic (plev, lat, lon) inputs. No real-data dependency —
 all tests run in under a second.

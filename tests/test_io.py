@@ -1,4 +1,4 @@
-"""Phase-2 tests: apinter.io loaders.
+"""Tests for apinter.io — CMIP6, observational SST, ERA5, ORAS5, SSP, joblib.
 
 Loads small real subsets (one year or one month) to validate the loaders
 against actual data. Meant to run on Perlmutter where the data exists.

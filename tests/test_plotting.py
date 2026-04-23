@@ -1,7 +1,8 @@
-"""Phase-4 tests: apinter.plotting smoke tests.
+"""Tests for apinter.plotting — index time series, spatial maps, circulation
+panels, omega lead-lag profiles.
 
-We drive each plotting function with a small synthetic DataArray/Dataset
-and check it produces a Figure without error (Matplotlib ``Agg`` backend).
+Each plotting function is driven with a small synthetic DataArray/Dataset
+and checked to produce a Figure without error (Matplotlib ``Agg`` backend).
 No reference-image diffing — that's too brittle for unit tests.
 """
 import matplotlib
