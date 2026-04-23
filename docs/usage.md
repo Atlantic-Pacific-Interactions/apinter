@@ -446,6 +446,148 @@ psi, phi = uv2psiphi(LON, LAT, U, V,
 
 ---
 
+## Plotting
+
+All plotting functions return the Figure/axes (or contour mesh) instead of
+calling `plt.show()`. Save with `savepath=...` or `output_dir=...`; if you
+don't pass those, nothing is written to disk.
+
+### Index time series
+
+```python
+import matplotlib.pyplot as plt
+from apinter.plotting import plot_index_ts, plot_index_grid
+
+# Single panel
+fig, ax = plt.subplots(figsize=(14, 4))
+plot_index_ts(tamv, ax,
+              left_title='HadISST', center_title='TAMV',
+              right_title='11-yr LPF', ylim=(-3, 3))
+
+# Grid of panels, one per dataset
+fig = plot_index_grid(
+    {'HadISST': tamv_had, 'ERSST': tamv_ers, 'COBE': tamv_cobe},
+    ncols=1, center_title='TAMV', right_title='11-yr LPF',
+    ylim=(-3, 3), savepath='figures/tamv_obs.png',
+)
+```
+
+### Spatial maps — regression & trend
+
+Regression map on a single axes (works with `regression_lags` output):
+
+```python
+import cartopy.crs as ccrs
+from apinter.plotting import plot_regression_map
+
+fig, ax = plt.subplots(subplot_kw={'projection': ccrs.Robinson(central_longitude=180)})
+im = plot_regression_map(
+    ax, reg_dataset, variable='beta',     # 'beta' matches regression_lags naming
+    title='TAMV → SSTA (concurrent)',
+    vmin=-0.8, vmax=0.8,
+    add_stippling=True, significance_alpha=0.1,
+    add_box=True, box_coords=(280, 0, 60, 30),   # TAMV box
+)
+fig.colorbar(im, ax=ax, orientation='horizontal', shrink=0.8)
+```
+
+Grid of regression maps:
+
+```python
+from apinter.plotting import plot_multiple_regression_maps
+
+fig = plot_multiple_regression_maps(
+    datasets=[reg_hadisst, reg_ersst, reg_cobe, reg_cmip6_mmm],
+    variable='beta',
+    titles=['HadISST', 'ERSST', 'COBE', 'CMIP6 MMM'],
+    suptitle='TAMV → SSTA regression',
+    nrows=2, ncols=2, vmin=-0.8, vmax=0.8,
+    savepath='figures/tamv_ssta_reg.png',
+)
+```
+
+Trend map (single field):
+
+```python
+from apinter.plotting import plot_trend_map
+
+fig = plot_trend_map(
+    trend_da, vmin=-0.5, vmax=0.5,
+    title='HadISST trend 1958–2014',
+    colorbar_label='°C/decade',
+)
+```
+
+Grid of per-model trends:
+
+```python
+from apinter.plotting import plot_cmip6_trends
+
+fig = plot_cmip6_trends(
+    {m: spatial_trend(sst_dict[m]) for m in sst_dict},
+    vmin=-0.5, vmax=0.5, ncols=4,
+    title='CMIP6 SST trends 1958–2014',
+    colorbar_label='°C/decade',
+    savepath='figures/cmip6_sst_trends.png',
+)
+```
+
+### Walker / Hadley / velocity-potential panels
+
+Each panel renders onto a caller-supplied axes; you build the figure and
+colorbar. Matches the `_v2` E3SMS layouts (log-pressure axis, Gaussian
+smoothing, centred 0-contour highlighted).
+
+```python
+from apinter.plotting import plot_walker_section, plot_hadley_section, plot_velpot_panel
+
+levels = np.arange(-2, 2.1, 0.2)
+
+fig, ax = plt.subplots(figsize=(12, 4))
+plot_walker_section(ax, psi_walker, lon, plev_hpa, levels=levels,
+                    lon_plot_bounds=(100, 360),
+                    left_title='(a)', right_title='ERA5',
+                    show_xlabel=True, show_ylabel=True)
+
+fig, ax = plt.subplots(figsize=(6, 4))
+plot_hadley_section(ax, psi_hadley_atlantic, lat, plev_hpa, levels=levels,
+                    lat_plot_bounds=(-30, 30),
+                    left_title='(b)', right_title='Atlantic')
+
+# Velocity potential + divergent-wind overlay at 200 hPa
+fig, ax = plt.subplots(subplot_kw={'projection': ccrs.Robinson(central_longitude=180)})
+cf = plot_velpot_panel(ax, chi * 1e-6, u_div, v_div, lat, lon,
+                       levels=np.arange(-10, 10.1, 1),
+                       quiver_step=8, min_wind=0.1)
+```
+
+### Omega lead-lag regression profiles (Paper_1)
+
+```python
+from apinter.plotting import plot_omega_lead_lag_profile, create_omega_regression_plots
+
+# Single model, single index
+fig, axs = plot_omega_lead_lag_profile(
+    model_results, model_name='HadISST',
+    index_name='tamv', var='regression',
+    vmin=-0.003, vmax=0.003,
+    savepath='figures/HadISST_tamv_omega_lead_lag.png',
+)
+
+# All indices in one call (writes one PNG per index)
+create_omega_regression_plots(
+    model_results, model_name='HadISST',
+    output_dir='figures/omega_lead_lag',
+    vmin=-0.003, vmax=0.003,
+)
+```
+
+The vertical separators at 30°E / 110°E / 180°E / 280°E and the
+*Indian / WP / CEP / Atlantic* region labels are drawn automatically — they
+match the Paper_1 omega-regression figure convention.
+
+---
+
 ## Significance
 
 ```python

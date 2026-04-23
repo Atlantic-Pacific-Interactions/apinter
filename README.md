@@ -56,7 +56,7 @@ reg = regression_lags(
 | `apinter.config` | paths, grid constants (CMIP6_DIR, ERA5_DIR, ORAS5_DIR, COMMON_PLEV, …) | ✅ phase 2 |
 | `apinter.io` | loaders for CMIP6, obs SST, ERA5, ORAS5, SSP; joblib | ✅ phase 2 |
 | `apinter.circulation` | Walker/Hadley ψ, Helmholtz decomposition, velocity potential, Li-2006 ψ/φ solver | ✅ phase 3 |
-| `apinter.plotting` | regression maps, index plots, trend maps, omega regression | ⬜ phase 4 |
+| `apinter.plotting` | index time series, regression/trend maps, Walker/Hadley panels, omega regression | ✅ phase 4 |
 
 ## Documentation
 

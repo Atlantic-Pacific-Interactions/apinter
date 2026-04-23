@@ -286,9 +286,71 @@ migration, they can be promoted back into the package then.
 
 ---
 
-## Phase 4 import map (to be filled in as phases land)
+## Phase 4 — plotting (available now)
 
-| Legacy name | New location | Phase |
-|---|---|---|
-| `Paper_1/src/omega_reg_plotting` | `apinter.plotting.omega_regression` | 4 |
-| `./src/plot/plot_index`, `plot_regression_map`, `plot_trend_map` | `apinter.plotting.*` | 4 |
+All ported functions return the Figure/axes/contour instead of calling
+``plt.show()``, and accept ``savepath=...`` (single figure) or
+``output_dir=...`` (multi-file) rather than hardcoded output paths.
+
+### Index time series
+
+| Legacy (`/pscratch/.../backup/ENSO-CLOUD/CMIP/cmip_plot.py`) | New canonical |
+|---|---|
+| `plot_nat_ts(data, ax, left_title, center_title, right_title)` | `apinter.plotting.plot_index_ts(data, ax, ...)` — generalized (any standardized index, not just NAT) |
+| `plot_cmip_ts_index(ssta_ds_dict, ncols, index, rolling_time)` — hardcoded save path | `apinter.plotting.plot_index_grid(indices_dict, ncols=3, ..., savepath=None)` |
+
+### Spatial maps — regression & trend
+
+| Legacy (`./src/plot/`) | New canonical |
+|---|---|
+| `plot_regression_map.plot_regression_map(ax, data, variable='slope', ...)` | `apinter.plotting.plot_regression_map(ax, data, variable='beta', ...)` — default variable renamed to match `regression_lags` output; `lat/lon` convention enforced |
+| `plot_regression_map.plot_multiple_regression_maps(datasets, ..., output_path='/pscratch/...figures')` | `apinter.plotting.plot_multiple_regression_maps(datasets, ..., savepath=None)` — hardcoded output path removed |
+| `plot_trend_map.plot_trend_map(figsize, data, vmin, vmax, save_fig=True, fig_name=None, title, label)` | `apinter.plotting.plot_trend_map(data, vmin, vmax, figsize=..., title=..., colorbar_label=..., savepath=None)` — signature reordered (``data`` first), `savepath` replaces `save_fig`+`fig_name` |
+| `plot_trend_map.plot_cmip6_trends(trend_data, vmin, vmax, title, label, save_fig, fig_name, ncols=4)` | `apinter.plotting.plot_cmip6_trends(trend_data, vmin, vmax, title='', colorbar_label='', ncols=4, savepath=None)` |
+
+### Walker / Hadley / velocity-potential panels
+
+These were defined inline in each E3SMS `plot_*_v2.py` (tightly coupled with
+the surrounding figure layout). The reusable single-axes bodies are now in
+`apinter.plotting.circulation`.
+
+| Legacy (inline in E3SMS `_v2` scripts) | New canonical |
+|---|---|
+| `plot_panel(ax, psi, lon, plev, left_title, right_title, levels, smooth_sigma=1.5)` from `plot_walker_streamfunction_v2.py` | `apinter.plotting.plot_walker_section(ax, psi, lon, plev_hpa, levels, ...)` |
+| `plot_psi(ax, psi, lat, plev_hpa, left_title, right_title, levels)` from `plot_hadley_cell_v2.py` | `apinter.plotting.plot_hadley_section(ax, psi, lat, plev_hpa, levels, ...)` |
+| `plot_panel(ax, chi, u_div, v_div, ...)` from `plot_velpot_200_global.py` | `apinter.plotting.plot_velpot_panel(ax, chi, u_div, v_div, lat, lon, levels, ...)` |
+
+The countour-label step now snaps requested label values to the nearest
+actually-drawn contour level instead of failing on near-duplicate floats,
+which makes the same call work with any ``levels=`` array.
+
+### Omega lead-lag profiles (Paper_1)
+
+| Legacy (`Paper_1/src/omega_reg_plotting.py`) | New canonical |
+|---|---|
+| `plot_omega_lead_lag_profile(data_dict, model_name, index_name, var, vmin, vmax, interval, save_fig, thinning_factor_lon, output_dir, figsize)` | `apinter.plotting.plot_omega_lead_lag_profile(data_dict, model_name, ..., savepath=None)` — `save_fig`+`output_dir` consolidated into `savepath` |
+| `create_omega_regression_plots(model_results, model_name, output_dir=None, vmin, vmax, interval)` | `apinter.plotting.create_omega_regression_plots(model_results, model_name, output_dir=None, ...)` — API preserved |
+| `convert_to_hPa` (legacy module-level helper) | inlined as the private `_convert_to_hPa` in `apinter.plotting.omega_regression` |
+
+### Dropped — not ported
+
+From the actual-usage audit (0 calls across all notebooks):
+
+| Dropped function | Legacy file |
+|---|---|
+| `fix_cftime` | `./src/plot/plot_index.py` |
+| `plot_single_index_subplot` | `./src/plot/plot_index.py` |
+| `plot_indices` | `./src/plot/plot_index.py` |
+| `plot_multiple_datasets` | `./src/plot/plot_index.py` |
+| `plot_combined_indices` | `./src/plot/plot_index.py` (1 call → inline or migrate to `plot_index_grid`) |
+| `plot_multiple_combined_indices` | `./src/plot/plot_index.py` |
+| `plot_single_regression_map` | `./src/plot/plot_regression_map.py` |
+| `plot_all_omega_indices` | `Paper_1/src/omega_reg_plotting.py` (wrapper that `create_omega_regression_plots` subsumes) |
+
+Total removed: ~800 lines of legacy plotting code that nothing imported.
+
+---
+
+All five phases are now available. Phase 5 migrates the notebook callers
+folder-by-folder (Paper_2 → SSP → Paper_1 → E3SMS) and removes the legacy
+`src/` trees once the last caller is updated.
