@@ -1,4 +1,6 @@
 """Tests for apinter.processing.regrid (xesmf-based 1° regridder)."""
+from typing import Optional
+
 import numpy as np
 import pytest
 import xarray as xr
@@ -129,22 +131,111 @@ def test_regrid_nersc_cmip6_wap_4d(_has_nersc_cmip6):
         pytest.skip("wap load returned empty")
 
     model, da = next(iter(native.items()))
-    # Must have a vertical coord (name varies: plev, lev, level)
     vertical = next((d for d in ('plev', 'lev', 'level') if d in da.dims), None)
     assert vertical is not None, f"no vertical dim in {da.dims}"
 
     out = regrid_to_1deg(da)
     assert out.sizes['lat'] == 180
     assert out.sizes['lon'] == 360
-    # Time + level preserved
     assert out.sizes.get('time') == da.sizes.get('time')
     assert out.sizes.get(vertical) == da.sizes.get(vertical)
+
+
+# ---------- ocean variables (curvilinear native grids) ----------
+
+def test_regrid_nersc_cmip6_tos_curvilinear_3d(_has_nersc_cmip6):
+    """Ocean SST `tos` lives on a curvilinear grid (e.g., dims (time, nlat, nlon)
+    with 2D lat(nlat, nlon) coords). xesmf handles this without special handling."""
+    from apinter.io import list_nersc_cmip6_models, load_nersc_cmip6
+
+    models = list_nersc_cmip6_models(
+        experiment_id='historical', variable_id='tos',
+        table_id='Omon', member_id='r1i1p1f1',
+    )
+    if not models:
+        pytest.skip("no tos/Omon/historical models")
+
+    native = load_nersc_cmip6(
+        variable_id='tos', experiment_id='historical',
+        table_id='Omon', source_ids=models[:1],
+        sim_time=slice('2000-01-01', '2000-01-31'),
+    )
+    if not native:
+        pytest.skip("tos load returned empty")
+
+    model, da = next(iter(native.items()))
+    out = regrid_to_1deg(da)
+    assert out.sizes['lat'] == 180
+    assert out.sizes['lon'] == 360
+    finite = out.values[np.isfinite(out.values)]
+    assert finite.size > 0
+    # Ocean SST in °C; CMIP6 reports tos in degC by convention
+    assert -3 < float(np.nanmean(finite)) < 35, (
+        f"{model}: mean tos {np.nanmean(finite):.2f} °C not plausible"
+    )
+
+
+def test_regrid_nersc_cmip6_thetao_curvilinear_4d(_has_nersc_cmip6):
+    """4D ocean (time, lev, nlat, nlon) thetao on a curvilinear grid. The
+    depth dim and time dim pass through; only nlat/nlon -> lat/lon happens."""
+    from apinter.io import list_nersc_cmip6_models, load_nersc_cmip6
+
+    models = list_nersc_cmip6_models(
+        experiment_id='historical', variable_id='thetao',
+        table_id='Omon', member_id='r1i1p1f1',
+    )
+    if not models:
+        pytest.skip("no thetao/Omon/historical models")
+
+    # thetao files are big — load just one month then slice depth manually.
+    from pathlib import Path
+    import xarray as xr
+    import apinter.config as cfg
+
+    def _walk_to(model: str) -> Optional[Path]:
+        for inst in (cfg.NERSC_CMIP6_DIR / 'CMIP').iterdir():
+            cand = inst / model / 'historical' / 'r1i1p1f1' / 'Omon' / 'thetao' / 'gn'
+            try:
+                if cand.is_dir():
+                    return cand
+            except PermissionError:
+                continue
+        return None
+
+    # Try models in order — some institutes restrict ocean subdirs.
+    cand = None
+    for m in models:
+        cand = _walk_to(m)
+        if cand is not None:
+            break
+    if cand is None:
+        pytest.skip("no readable thetao dir found")
+    ncs = sorted(cand.rglob('*.nc'))
+    if not ncs:
+        pytest.skip("no thetao .nc files")
+
+    ds = xr.open_dataset(ncs[0]).isel(time=slice(0, 1))
+    # Take just the first 3 depth levels to keep memory small
+    depth_dim = next((d for d in ('lev', 'deptht', 'olevel', 'depth') if d in ds.dims), None)
+    if depth_dim is None:
+        pytest.skip(f"no recognized depth dim in {list(ds.dims)}")
+    da = ds['thetao'].isel({depth_dim: slice(0, 3)})
+
+    out = regrid_to_1deg(da)
+    assert out.sizes['lat'] == 180
+    assert out.sizes['lon'] == 360
+    assert out.sizes.get(depth_dim) == 3
+    assert out.sizes.get('time') == 1
 
 
 # ---------- full-ensemble survey (opt-in, slow) ----------
 
 @pytest.mark.slow
-@pytest.mark.parametrize("variable,table_id", [('ts', 'Amon'), ('wap', 'Amon')])
+@pytest.mark.parametrize("variable,table_id", [
+    ('ts',  'Amon'),   # 3D atmospheric (time, lat, lon)
+    ('wap', 'Amon'),   # 4D atmospheric (time, plev, lat, lon)
+    ('tos', 'Omon'),   # 3D ocean — curvilinear native grid
+])
 def test_regrid_all_nersc_cmip6_models(_has_nersc_cmip6, variable, table_id):
     """Load + regrid every available NERSC CMIP6 model for the given variable.
 
@@ -170,6 +261,7 @@ def test_regrid_all_nersc_cmip6_models(_has_nersc_cmip6, variable, table_id):
         try:
             native = load_nersc_cmip6(
                 variable_id=variable, experiment_id='historical',
+                table_id=table_id,
                 source_ids=[m],
                 sim_time=slice('2000-01-01', '2000-01-31'),
             )

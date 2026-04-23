@@ -115,17 +115,34 @@ def list_nersc_cmip6_models(experiment_id: str,
         return []
 
     found: List[str] = []
-    for inst_dir in sorted(activity_dir.iterdir()):
-        if not inst_dir.is_dir():
-            continue
-        for model_dir in sorted(inst_dir.iterdir()):
-            if not model_dir.is_dir():
+    try:
+        institutes = sorted(activity_dir.iterdir())
+    except PermissionError:
+        return []
+    for inst_dir in institutes:
+        try:
+            if not inst_dir.is_dir():
                 continue
-            var_dir = (model_dir / experiment_id / member_id / table_id
-                       / variable_id / grid_label)
-            if var_dir.is_dir():
-                found.append(model_dir.name)
+            for model_dir in sorted(inst_dir.iterdir()):
+                if not model_dir.is_dir():
+                    continue
+                var_dir = (model_dir / experiment_id / member_id / table_id
+                           / variable_id / grid_label)
+                if _safe_is_dir(var_dir):
+                    found.append(model_dir.name)
+        except PermissionError:
+            # Some institute subtrees are restricted (e.g. E3SM ocean dirs);
+            # skip and keep going.
+            continue
     return sorted(found)
+
+
+def _safe_is_dir(p: Path) -> bool:
+    """Path.is_dir() that returns False on PermissionError instead of raising."""
+    try:
+        return p.is_dir()
+    except PermissionError:
+        return False
 
 
 def load_nersc_cmip6(variable_id: str,
@@ -273,19 +290,23 @@ def _find_var_dir(base: Path, activity: str, source_id: str,
         return None
     var_dir = (model_dir / experiment_id / member_id / table_id
                / variable_id / grid_label)
-    return var_dir if var_dir.is_dir() else None
+    return var_dir if _safe_is_dir(var_dir) else None
 
 
 def _find_model_dir(base: Path, activity: str,
                     source_id: str) -> Optional[Path]:
     """Walk {base}/{activity}/*/<source_id>/ to find the model's root dir."""
     activity_dir = base / activity
-    if not activity_dir.is_dir():
+    if not _safe_is_dir(activity_dir):
         return None
-    for inst_dir in activity_dir.iterdir():
-        if not inst_dir.is_dir():
+    try:
+        institutes = list(activity_dir.iterdir())
+    except PermissionError:
+        return None
+    for inst_dir in institutes:
+        if not _safe_is_dir(inst_dir):
             continue
         candidate = inst_dir / source_id
-        if candidate.is_dir():
+        if _safe_is_dir(candidate):
             return candidate
     return None
