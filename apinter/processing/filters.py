@@ -57,3 +57,38 @@ def lanczos_lowpass(data: xr.DataArray, cutoff_period: float, window: int = None
 
     return xr.DataArray(filtered_values, coords=coords, dims=dims,
                         attrs=attrs, name=name)
+
+
+def apply_lowpass(data: xr.DataArray,
+                  cutoff_period: float,
+                  method: str = 'lanczos',
+                  time_dim: str = 'time') -> xr.DataArray:
+    """
+    Dispatch low-pass filter by method.
+
+    Parameters
+    ----------
+    data : xr.DataArray with a time dim.
+    cutoff_period : float
+        Time scale in the time-dim spacing units (e.g., months).
+    method : {'lanczos', 'running_mean', None, 'none'}
+        'lanczos': Lanczos low-pass with `cutoff_period` as cutoff.
+        'running_mean': centered rolling mean with window=int(round(cutoff_period)).
+        None / 'none': pass through unchanged.
+    time_dim : str
+
+    Returns
+    -------
+    xr.DataArray
+        Filtered series (same shape as input).
+    """
+    if method == 'lanczos':
+        return lanczos_lowpass(data, cutoff_period, time_dim=time_dim)
+    if method == 'running_mean':
+        window = int(round(cutoff_period))
+        return data.rolling({time_dim: window}, center=True, min_periods=1).mean()
+    if method is None or method == 'none':
+        return data
+    raise ValueError(
+        f"Unknown method {method!r}. Expected 'lanczos', 'running_mean', or None."
+    )
