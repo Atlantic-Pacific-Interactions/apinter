@@ -1,85 +1,130 @@
-"""Climate index calculation (TAMV, TPDV, AMO, ENSO, etc.)."""
+"""Climate index calculation (canonical Paper_1 pipeline with Lanczos low-pass).
+
+Pipeline: monthly anomaly -> optional detrend -> area-weighted regional mean ->
+low-pass filter (Lanczos by default) -> optional standardization by std.
+"""
 import logging
 from typing import Dict, Optional, Tuple
 
 import xarray as xr
 
-from .processing.anomalies import compute_anomalies, detrend_dim
-from .processing.regions import extract_region
+from .processing.anomalies import detrend_dim
+from .processing.filters import lanczos_lowpass
+from .processing.regions import wgt_areaave
 
 logger = logging.getLogger(__name__)
+
+
+def compute_anomaly_field(data: xr.DataArray, detrend: bool = True) -> xr.DataArray:
+    """
+    Gridded monthly anomaly with optional linear detrend.
+
+    Subtracts monthly climatology; if detrend=True, applies linear detrend on time.
+    Shape is preserved (no spatial averaging).
+    """
+    clim = data.groupby('time.month').mean('time')
+    anom = data.groupby('time.month') - clim
+    if detrend:
+        anom = detrend_dim(anom, 'time')
+    return anom
+
+
+def _apply_filter(data: xr.DataArray, cutoff_period: float, method: str) -> xr.DataArray:
+    """Dispatch low-pass filter by method."""
+    if method == 'lanczos':
+        return lanczos_lowpass(data, cutoff_period)
+    if method == 'running_mean':
+        window = int(round(cutoff_period))
+        return data.rolling(time=window, center=True, min_periods=1).mean()
+    if method is None or method == 'none':
+        return data
+    raise ValueError(
+        f"Unknown method {method!r}. Expected 'lanczos', 'running_mean', or None."
+    )
 
 
 def calculate_index(sst_data: xr.DataArray,
                     lon_bounds: Tuple[float, float],
                     lat_bounds: Tuple[float, float],
                     detrend: bool = True,
-                    rolling_time: Optional[int] = None
-                    ) -> Tuple[xr.DataArray, xr.DataArray]:
+                    cutoff_period: float = 132,
+                    method: str = 'lanczos',
+                    normalize: bool = True) -> xr.DataArray:
     """
-    Compute a climate index from SST for one lat/lon box.
+    Climate index from SST (canonical Paper_1 pipeline).
 
-    Pipeline: extract region (area-weighted mean) -> optional detrend ->
-    monthly-climatology anomalies -> optional rolling mean -> normalize.
+    anomaly -> optional detrend -> area-weighted regional mean ->
+    low-pass filter -> optional standardize.
 
-    Returns (index_anomaly, index_normalized).
+    Parameters
+    ----------
+    sst_data : xr.DataArray with dims (time, lat, lon).
+    lon_bounds, lat_bounds : (min, max).
+    detrend : Linear detrend after anomaly (default True).
+    cutoff_period : Filter time scale in months (default 132 = 11 years).
+    method : {'lanczos', 'running_mean', None}.
+    normalize : Divide by std after filtering (default True).
     """
-    logger.info(f"Calculating index for region: lon {lon_bounds}, lat {lat_bounds}")
-    logger.info(f"Detrend: {detrend}, Rolling time: {rolling_time}")
+    logger.info(
+        f"Calculating index: lon {lon_bounds}, lat {lat_bounds}, "
+        f"method={method}, cutoff={cutoff_period} months"
+    )
+    anom = compute_anomaly_field(sst_data, detrend=detrend)
+    regional = wgt_areaave(anom, lat_bounds[0], lat_bounds[1],
+                           lon_bounds[0], lon_bounds[1])
+    filtered = _apply_filter(regional, cutoff_period, method)
+    if normalize:
+        filtered = filtered / filtered.std('time')
+    return filtered
 
-    sst_region = extract_region(sst_data, lon_bounds, lat_bounds)
 
-    if detrend:
-        logger.info("Applying detrending")
-        sst_region = detrend_dim(sst_region, dim='time')
-
-    logger.info("Computing anomalies")
-    return compute_anomalies(sst_region, rolling_time)
-
-
-def calculate_multiple_indices(sst_data: xr.DataArray,
-                               regions: Dict[str, Tuple[Tuple[float, float], Tuple[float, float]]],
-                               detrend: bool = True,
-                               rolling_time: Optional[int] = None
-                               ) -> Tuple[Dict[str, xr.DataArray], Dict[str, xr.DataArray]]:
+def calculate_multiple_indices(
+    sst_data: xr.DataArray,
+    regions: Dict[str, Tuple[Tuple[float, float], Tuple[float, float]]],
+    detrend: bool = True,
+    cutoff_period: float = 132,
+    method: str = 'lanczos',
+    normalize: bool = True,
+) -> Dict[str, xr.DataArray]:
     """
-    Compute multiple regional indices from one SST field.
+    Multiple regional indices from one SST field.
 
-    regions: {name: ((lon_min, lon_max), (lat_min, lat_max))}.
-    Returns (anomalies, normalized_anomalies) as dicts keyed by region name.
+    Computes the gridded anomaly once, then derives each regional index.
+
+    regions : {name: ((lon_min, lon_max), (lat_min, lat_max))}.
     """
-    logger.info(f"Calculating indices for {len(regions)} regions")
+    logger.info(f"Calculating {len(regions)} indices (method={method})")
+    anom = compute_anomaly_field(sst_data, detrend=detrend)
 
-    anomalies: Dict[str, xr.DataArray] = {}
-    normalized: Dict[str, xr.DataArray] = {}
-
+    out: Dict[str, xr.DataArray] = {}
     for name, (lon_bounds, lat_bounds) in regions.items():
-        logger.info(f"Processing region: {name}")
-        sst_region = extract_region(sst_data, lon_bounds, lat_bounds)
-        if detrend:
-            sst_region = detrend_dim(sst_region, dim='time')
-        anomalies[name], normalized[name] = compute_anomalies(sst_region, rolling_time)
+        regional = wgt_areaave(anom, lat_bounds[0], lat_bounds[1],
+                               lon_bounds[0], lon_bounds[1])
+        filtered = _apply_filter(regional, cutoff_period, method)
+        if normalize:
+            filtered = filtered / filtered.std('time')
+        out[name] = filtered
+    return out
 
-    return anomalies, normalized
 
-
-def calculate_gridded_anomalies(data: xr.DataArray,
-                                lon_bounds: Optional[Tuple[float, float]] = None,
-                                lat_bounds: Optional[Tuple[float, float]] = None,
-                                detrend: bool = True,
-                                rolling_time: Optional[int] = None
-                                ) -> Tuple[xr.DataArray, xr.DataArray]:
+def calculate_gridded_anomalies(
+    data: xr.DataArray,
+    lon_bounds: Optional[Tuple[float, float]] = None,
+    lat_bounds: Optional[Tuple[float, float]] = None,
+    detrend: bool = True,
+    cutoff_period: Optional[float] = 132,
+    method: str = 'lanczos',
+    normalize: bool = True,
+) -> xr.DataArray:
     """
-    Gridded anomalies (keeps spatial dims) with optional regional subset + detrend.
+    Gridded low-pass-filtered anomaly (keeps spatial dims).
 
-    Returns (anomaly, normalized).
+    optional region crop -> monthly anomaly -> optional detrend ->
+    optional low-pass filter -> optional standardize.
+
+    Pass cutoff_period=None or method=None to skip the filter step.
     """
     is_regional = lon_bounds is not None and lat_bounds is not None
-    region_info = f"lon {lon_bounds}, lat {lat_bounds}" if is_regional else "global"
-
-    logger.info(f"Calculating gridded anomalies for {region_info}")
-    logger.info(f"Input data shape: {data.shape}")
-
     if is_regional:
         lat_name = 'lat' if 'lat' in data.dims else 'latitude'
         lon_name = 'lon' if 'lon' in data.dims else 'longitude'
@@ -87,7 +132,13 @@ def calculate_gridded_anomalies(data: xr.DataArray,
         mask_lat = (data[lat_name] >= lat_bounds[0]) & (data[lat_name] <= lat_bounds[1])
         data = data.where(mask_lon & mask_lat, drop=True)
 
-    if detrend:
-        data = detrend_dim(data, dim='time')
+    anom = compute_anomaly_field(data, detrend=detrend)
 
-    return compute_anomalies(data, rolling_time)
+    if cutoff_period is None or method is None or method == 'none':
+        filtered = anom
+    else:
+        filtered = _apply_filter(anom, cutoff_period, method)
+
+    if normalize:
+        filtered = filtered / filtered.std('time')
+    return filtered

@@ -156,10 +156,57 @@ def test_autocorrelation_matches_legacy(ts_1d):
 
 # ---------- Indices ----------
 
-def test_calculate_index_matches_legacy(field_2d):
-    from apinter.indices import calculate_index as new
-    from cal_index import calculate_index as old
-    a_new, n_new = new(field_2d, (60, 240), (-15, 15))
-    a_old, n_old = old(field_2d, (60, 240), (-15, 15))
-    np.testing.assert_allclose(a_new.values, a_old.values, rtol=1e-12)
-    np.testing.assert_allclose(n_new.values, n_old.values, rtol=1e-12)
+def test_calculate_index_matches_paper1_canonical(field_2d):
+    """Verify calculate_index matches Paper_1 notebook 05 hand-coded pipeline:
+    anomaly -> detrend -> area-weighted mean -> Lanczos LPF -> standardize."""
+    from apinter.indices import calculate_index
+    from apinter.processing import detrend_dim, lanczos_lowpass, wgt_areaave
+
+    sst = field_2d
+
+    new = calculate_index(sst, (60, 240), (-15, 15))
+
+    clim = sst.groupby('time.month').mean('time')
+    anom = sst.groupby('time.month') - clim
+    anom_d = detrend_dim(anom, 'time')
+    regional = wgt_areaave(anom_d, -15, 15, 60, 240)
+    filtered = lanczos_lowpass(regional, 132)
+    standardized = filtered / filtered.std('time')
+
+    np.testing.assert_allclose(new.values, standardized.values, rtol=1e-12)
+
+
+def test_calculate_index_running_mean_method(field_2d):
+    """method='running_mean' applies a centered rolling mean instead of Lanczos."""
+    from apinter.indices import calculate_index
+    from apinter.processing import detrend_dim, wgt_areaave
+
+    sst = field_2d
+
+    new = calculate_index(sst, (60, 240), (-15, 15), method='running_mean',
+                          cutoff_period=12)
+
+    clim = sst.groupby('time.month').mean('time')
+    anom = sst.groupby('time.month') - clim
+    anom_d = detrend_dim(anom, 'time')
+    regional = wgt_areaave(anom_d, -15, 15, 60, 240)
+    rolled = regional.rolling(time=12, center=True, min_periods=1).mean()
+    standardized = rolled / rolled.std('time')
+
+    np.testing.assert_allclose(new.values, standardized.values, rtol=1e-12)
+
+
+def test_calculate_multiple_indices(field_2d):
+    """calculate_multiple_indices computes anomaly once, returns one series per region."""
+    from apinter.indices import calculate_index, calculate_multiple_indices
+
+    regions = {
+        'A': ((60, 240), (-15, 15)),
+        'B': ((120, 300), (-30, 0)),
+    }
+    multi = calculate_multiple_indices(field_2d, regions)
+    assert set(multi.keys()) == {'A', 'B'}
+
+    for name, (lon_b, lat_b) in regions.items():
+        single = calculate_index(field_2d, lon_b, lat_b)
+        np.testing.assert_allclose(multi[name].values, single.values, rtol=1e-12)
