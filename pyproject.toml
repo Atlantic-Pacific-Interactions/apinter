@@ -48,7 +48,14 @@ dependencies = [
 
 [project.optional-dependencies]
 circulation = ["windspharm"]
+regrid = ["xesmf>=0.8"]
 dev = ["pytest"]
+
+[tool.pytest.ini_options]
+markers = [
+    "slow: long-running tests (use 'pytest -m slow' to run; skipped by default)",
+]
+addopts = "-m 'not slow'"
 
 [project.urls]
 Homepage = "https://github.com/Atlantic-Pacific-Interactions/apinter"

@@ -106,3 +106,88 @@ def test_regrid_dict_to_1deg_smoke(_has_nersc_cmip6):
     for name, da in out.items():
         assert da.sizes['lat'] == 180
         assert da.sizes['lon'] == 360
+
+
+def test_regrid_nersc_cmip6_wap_4d(_has_nersc_cmip6):
+    """Load a 4D (time, level, lat, lon) field and regrid. xesmf regrids the
+    lat/lon plane only; level and time pass through untouched."""
+    from apinter.io import list_nersc_cmip6_models, load_nersc_cmip6
+
+    models = list_nersc_cmip6_models(
+        experiment_id='historical', variable_id='wap',
+        table_id='Amon', member_id='r1i1p1f1',
+    )
+    if not models:
+        pytest.skip("no wap/historical/r1i1p1f1 models")
+
+    native = load_nersc_cmip6(
+        variable_id='wap', experiment_id='historical',
+        source_ids=models[:1],
+        sim_time=slice('2000-01-01', '2000-01-31'),
+    )
+    if not native:
+        pytest.skip("wap load returned empty")
+
+    model, da = next(iter(native.items()))
+    # Must have a vertical coord (name varies: plev, lev, level)
+    vertical = next((d for d in ('plev', 'lev', 'level') if d in da.dims), None)
+    assert vertical is not None, f"no vertical dim in {da.dims}"
+
+    out = regrid_to_1deg(da)
+    assert out.sizes['lat'] == 180
+    assert out.sizes['lon'] == 360
+    # Time + level preserved
+    assert out.sizes.get('time') == da.sizes.get('time')
+    assert out.sizes.get(vertical) == da.sizes.get(vertical)
+
+
+# ---------- full-ensemble survey (opt-in, slow) ----------
+
+@pytest.mark.slow
+@pytest.mark.parametrize("variable,table_id", [('ts', 'Amon'), ('wap', 'Amon')])
+def test_regrid_all_nersc_cmip6_models(_has_nersc_cmip6, variable, table_id):
+    """Load + regrid every available NERSC CMIP6 model for the given variable.
+
+    Run with ``pytest -m slow`` — this takes ~2 minutes and exercises 30+
+    models end-to-end (load native-grid -> xesmf bilinear -> 180x360).
+
+    Two known-bad models are accepted (``ICON-ESM-LR`` has an icosahedral
+    grid not representable as rectilinear lat/lon; ``IITM-ESM`` has an
+    empty version directory on the NERSC mirror). All others must succeed.
+    """
+    from apinter.io import list_nersc_cmip6_models, load_nersc_cmip6
+
+    models = list_nersc_cmip6_models(
+        experiment_id='historical', variable_id=variable,
+        table_id=table_id, member_id='r1i1p1f1',
+    )
+    if not models:
+        pytest.skip(f"no {variable}/historical/r1i1p1f1 models")
+
+    EXPECTED_FAILURES = {'ICON-ESM-LR', 'IITM-ESM'}
+    succeeded, failed = [], []
+    for m in models:
+        try:
+            native = load_nersc_cmip6(
+                variable_id=variable, experiment_id='historical',
+                source_ids=[m],
+                sim_time=slice('2000-01-01', '2000-01-31'),
+            )
+            if m not in native:
+                raise RuntimeError("load returned empty dict")
+            out = regrid_to_1deg(native[m])
+            assert out.sizes['lat'] == 180 and out.sizes['lon'] == 360
+            succeeded.append(m)
+        except Exception as e:
+            failed.append((m, f"{type(e).__name__}: {str(e)[:80]}"))
+
+    unexpected = [(m, e) for (m, e) in failed if m not in EXPECTED_FAILURES]
+    assert not unexpected, (
+        f"{variable}: {len(unexpected)} unexpected failure(s): " + "; ".join(
+            f"{m} ({e})" for m, e in unexpected
+        )
+    )
+    # Sanity: at least 80% of models should succeed
+    assert len(succeeded) / len(models) > 0.80, (
+        f"{variable}: only {len(succeeded)}/{len(models)} models succeeded"
+    )
