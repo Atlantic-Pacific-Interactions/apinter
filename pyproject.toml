@@ -1,0 +1,31 @@
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "apinter"
+version = "0.1.0"
+description = "Shared analysis library for Atlantic-Pacific climate interaction research"
+readme = "README.md"
+requires-python = ">=3.10"
+authors = [{name = "Yan Xia", email = "yxia24@uci.edu"}]
+dependencies = [
+    "numpy",
+    "pandas",
+    "xarray",
+    "scipy",
+    "matplotlib",
+    "cartopy",
+    "cftime",
+    "joblib",
+    "netCDF4",
+    "zarr",
+]
+
+[project.optional-dependencies]
+circulation = ["windspharm"]
+dev = ["pytest"]
+
+[tool.setuptools.packages.find]
+include = ["apinter*"]
+exclude = ["tests*", "docs*"]
