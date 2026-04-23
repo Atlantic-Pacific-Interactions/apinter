@@ -9,15 +9,36 @@ from typing import Dict
 import numpy as np
 import xarray as xr
 
-from apinter.config import COBE_PATH, ERSST_PATH, HADISST_PATH
+from apinter.config import (
+    COBE_PATH,
+    ERSST_PATH,
+    HADISST_PATH,
+    NERSC_DATALAKE_DIR,
+)
 
 logger = logging.getLogger(__name__)
 
 
 OBS_SST_SOURCES: Dict[str, Dict] = {
+    # Per-user copies under /pscratch/sd/y/yanxia/DATA
     'hadisst': {'path': HADISST_PATH, 'var': 'sst', 'missing': -1000.0},
     'ersst':   {'path': ERSST_PATH,   'var': 'sst', 'missing': -1000.0},
     'cobesst': {'path': COBE_PATH,    'var': 'sst', 'missing': None},
+
+    # Canonical NERSC community datalake copies (read-only, group m3522).
+    # Use these when running on Perlmutter without the per-user mirror.
+    'hadisst_nersc': {
+        'path': NERSC_DATALAKE_DIR / 'HadISST' / 'HadISST_sst.nc',
+        'var': 'sst', 'missing': -1000.0,
+    },
+    'cobe2_nersc': {
+        'path': NERSC_DATALAKE_DIR / 'COBE2' / 'sst.mon.mean.nc',
+        'var': 'sst', 'missing': None,
+    },
+    'oisst_v2_nersc': {
+        'path': NERSC_DATALAKE_DIR / 'OISST_V2' / 'sst.mnmean.nc',
+        'var': 'sst', 'missing': None,
+    },
 }
 
 

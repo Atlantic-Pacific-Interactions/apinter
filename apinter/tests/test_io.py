@@ -46,7 +46,9 @@ def test_cmip6_vars_spec_shape():
 
 
 def test_obs_sst_sources_shape():
-    assert set(OBS_SST_SOURCES) == {'hadisst', 'ersst', 'cobesst'}
+    # Per-user mirror sources must always be present; NERSC datalake
+    # variants are added on the dev branch and are included when available.
+    assert {'hadisst', 'ersst', 'cobesst'} <= set(OBS_SST_SOURCES)
 
 
 def test_ssp_vars_shape():
