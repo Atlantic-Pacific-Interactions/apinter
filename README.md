@@ -53,8 +53,8 @@ reg = regression_lags(
 | `apinter.processing` | detrend, anomaly, filters, area-weighted mean | ✅ phase 1 |
 | `apinter.stats` | trends, regression, lead-lag correlation, significance | ✅ phase 1 |
 | `apinter.indices` | climate index calculation (canonical Paper_1 pipeline) | ✅ phase 1 |
-| `apinter.config` | paths, grid constants (CMIP6_DIR, ERA5_DIR, COMMON_PLEV, …) | ⬜ phase 2 |
-| `apinter.io` | generic loaders for CMIP6, ERA5, obs SST, SSP, joblib | ⬜ phase 2 |
+| `apinter.config` | paths, grid constants (CMIP6_DIR, ERA5_DIR, ORAS5_DIR, COMMON_PLEV, …) | ✅ phase 2 |
+| `apinter.io` | loaders for CMIP6, obs SST, ERA5, ORAS5, SSP; joblib | ✅ phase 2 |
 | `apinter.circulation` | Walker, Hadley, Helmholtz, velocity potential | ⬜ phase 3 |
 | `apinter.plotting` | regression maps, index plots, trend maps, omega regression | ⬜ phase 4 |
 

@@ -15,6 +15,146 @@ load -> compute_anomaly -> (regional mean) -> lowpass filter -> standardize
 
 `apinter.processing` provides each stage as a reusable primitive.
 `apinter.indices` composes them for common index and gridded-anomaly workflows.
+`apinter.io` handles all reading from disk (CMIP6, observations, reanalyses).
+
+---
+
+## I/O — loading data
+
+Single-variable spec dicts drive every loader. The full list of supported
+variables is the keys of each `*_VARS` dict:
+
+```python
+from apinter.io import CMIP6_VARS, ERA5_VARS, OBS_SST_SOURCES, ORAS5_VARS, SSP_VARS
+```
+
+### CMIP6 multi-model load
+
+Generic entry point replaces the 9 legacy per-variable functions:
+
+```python
+from apinter.io import load_cmip6
+
+# SST: K->C + outlier filter (-10 < SST < 40 °C, E3SMS convention).
+# Returns {model_name: xr.DataArray}. Missing files silently skipped.
+sst = load_cmip6('ts', sim_time=slice('1980', '2014'))
+
+# Multi-model omega, specific subset of models:
+wap = load_cmip6('wap', models=['ACCESS-CM2', 'CESM2'])
+
+# 3D wind field, sliced to a single pressure level on load:
+ua_850 = load_cmip6('ua', level=850)
+
+# Legacy names kept as thin wrappers — existing code still works:
+from apinter.io import load_cmip6_sst, load_cmip6_wind
+sst = load_cmip6_sst(sim_time=slice('1980', '2014'))
+winds = load_cmip6_wind(target_level=850)   # {model: {'ua': ..., 'va': ...}}
+```
+
+Available variables:
+
+```python
+>>> sorted(CMIP6_VARS)
+['pr', 'psl', 'ts', 'ua', 'va', 'wap', 'zg', 'tauu', 'thetao', 'zos']
+```
+
+`ts` gets K→C + the SST outlier filter; `zos` gets the explicit land-sea
+mask; all other variables are passed through with only the coord rename
+(`latitude/longitude → lat/lon`, `plev → level`).
+
+### Observational SST
+
+```python
+from apinter.io import load_obs_sst
+
+hadisst = load_obs_sst('hadisst', sim_time=slice('1891', '2014'))
+ersst   = load_obs_sst('ersst',   sim_time=slice('1891', '2014'))
+cobe    = load_obs_sst('cobesst', sim_time=slice('1891', '2014'))
+```
+
+Sources are in `OBS_SST_SOURCES`; missing-value sentinels (e.g. HadISST's
+−1000) are already converted to NaN.
+
+### ERA5 reanalysis
+
+One function covers every ERA5 file on disk:
+
+```python
+from apinter.io import load_era5
+
+# 3D variable, single pressure level, one-month smoke load:
+u850 = load_era5('u', level=850, sim_time=slice('2000-01', '2000-01'))
+
+# Surface variable with regional subset:
+slp_atl = load_era5('slp',
+                    sim_time=slice('1990', '2014'),
+                    region={'lat': (-30, 30), 'lon': (280, 360)})
+
+# Surface-bundle variables (u10/v10/t2m/d2m share one NetCDF):
+t2m = load_era5('t2m', sim_time=slice('2000', '2005'))
+```
+
+Supported `var` keys:
+
+| Kind | Variables |
+|---|---|
+| Pressure-level (3D) | `u`, `v`, `q`, `z`, `pl_omega` |
+| Single-level | `omega500`, `slp`, `sst`, `tp`, `mtnlwrf` |
+| Surface bundle | `u10`, `v10`, `t2m`, `d2m` |
+
+**Performance note:** selections (`level`, `sim_time`, `region`) are pushed
+down into each file open *before* `.load()`, so small requests don't read
+the full multi-GB file. Always pass these when you can.
+
+### ORAS5 ocean reanalysis
+
+NEMO ORCA025 per-month files, starting 1958-01:
+
+```python
+from apinter.io import load_oras5, regrid_to_equatorial_lon, load_oras5_equatorial
+
+# Native curvilinear grid (keeps nav_lat, nav_lon 2D coords):
+ssh = load_oras5('ssh', sim_time=slice('2000', '2014'))
+
+# Equatorial-band Hovmoller regrid (matches Paper_1 nb 36/42):
+ssh_eq = regrid_to_equatorial_lon(ssh,
+                                   lon_bounds=(120, 290),
+                                   lat_bounds=(-5.5, 5.5),
+                                   lon_step=2.0)
+
+# Or the one-shot convenience:
+tauu_eq = load_oras5_equatorial('tauu', lon_bounds=(120, 290),
+                                lat_bounds=(-5.5, 5.5), lon_step=2.0,
+                                sim_time=slice('1958', '2014'))
+```
+
+Supported `var` keys: `d20`, `ssh`, `mld030`, `tauu`, `tauv`, `hfds`,
+`thetao`, `salinity`, `uo`, `vo`, `wo`.
+
+### SSP historical + scenario concat
+
+One function for every SSP variable — handles K→C, SST outlier filter,
+grid alignment, and the historical→SSP variable name change automatically:
+
+```python
+from apinter.io import load_and_concat, get_ssp_models
+
+models = get_ssp_models('ssp245', var='sst')       # models with both halves
+sst_series = load_and_concat('sst', ssp='ssp245', model=models[0],
+                             full_time=slice('1850', '2100'))
+# Continuous time axis from 1850-01 to 2100-12, °C, ocean-only.
+```
+
+Supported `var` keys: `sst`, `wap`, `pr`, `prc`.
+
+### joblib I/O
+
+```python
+from apinter.io import load_joblib, save_joblib
+
+save_joblib(obj, '/path/to/result.joblib')    # auto-creates parent dir
+data = load_joblib('/path/to/result.joblib')
+```
 
 ---
 
@@ -228,11 +368,11 @@ rarely call them directly.
 ## Putting it together: a minimal Paper_1 workflow
 
 ```python
-import xarray as xr
+from apinter.io import load_obs_sst
 from apinter.indices import calculate_multiple_indices, gridded_anomalies
 from apinter.stats import regression_lags
 
-sst = xr.open_dataset("hadisst.nc")["sst"].sel(time=slice("1891", "2014"))
+sst = load_obs_sst('hadisst', sim_time=slice('1891', '2014'))
 
 indices = calculate_multiple_indices(sst, {
     'tamv': ((280, 340), (0, 30)),
