@@ -57,4 +57,3 @@ Issues = "https://github.com/Atlantic-Pacific-Interactions/apinter/issues"
 
 [tool.setuptools.packages.find]
 include = ["apinter*"]
-exclude = ["tests*", "docs*"]
