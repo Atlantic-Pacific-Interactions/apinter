@@ -28,6 +28,13 @@ ERSST_PATH = DATA_DIR / "ERSST" / "ERSSTv5_sst.mnmean_185401_202412.nc"
 COBE_PATH = DATA_DIR / "COBE" / "cobe.189101_202306.mon.mean.nc"
 
 # ---------------------------------------------------------------------------
+# ORAS5 ocean reanalysis (NEMO ORCA025, monthly per-file, from 1958-01)
+# ---------------------------------------------------------------------------
+
+ORAS5_DIR = DATA_DIR / "ORAS5"
+ORAS5_START_YEAR = 1958
+
+# ---------------------------------------------------------------------------
 # ERA5 files (monthly, multi-decade, split by time range)
 # ---------------------------------------------------------------------------
 
