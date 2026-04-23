@@ -1,7 +1,11 @@
-"""Statistics: trends, regression, lead-lag, significance testing.
+"""Statistics: trends, regression, correlation, significance.
 
-Canonical regression entry point: `regression_lags` — simple or partial,
-one or many lags, with Bretherton-effective-DoF significance.
+Canonical regression entry point: `regression_lags` — simple or partial
+(with a confounder), concurrent or multi-lag, with Bretherton-effective-DoF
+significance. Use it for all field-on-index regression.
+
+For 1D-on-1D lead-lag correlation between two time series, use
+`calculate_correlation` / `calculate_multi_model_mean_correlation`.
 """
 from .trends import (
     global_mean_trend,
@@ -17,10 +21,6 @@ from .regression import (
     calculate_regression_vectorize,
     calculate_correlation,
     calculate_multi_model_mean_correlation,
-)
-from .leadlag import (
-    calculate_lead_lag_regression,
-    calculate_partial_lead_lag_regression,
 )
 from .significance import (
     autocorrelation_function,
@@ -38,14 +38,11 @@ __all__ = [
     "assign_season",
     "seasonal_trend",
     "all_seasonal_trends",
-    # regression (canonical first)
+    # regression + correlation (all field/time-series regression lives here)
     "regression_lags",
     "calculate_regression_vectorize",
     "calculate_correlation",
     "calculate_multi_model_mean_correlation",
-    # leadlag (legacy shims)
-    "calculate_lead_lag_regression",
-    "calculate_partial_lead_lag_regression",
     # significance
     "autocorrelation_function",
     "effective_degrees_of_freedom",

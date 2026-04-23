@@ -194,21 +194,31 @@ def test_regression_lags_partial_with_confounder(ts_1d, field_2d):
                                   'target_pval', 'confounder_pval'}
 
 
-def test_partial_shim_delegates_to_regression_lags(ts_1d, field_2d):
-    """Legacy shim returns the same coefficients as regression_lags."""
-    from apinter.stats import calculate_partial_lead_lag_regression, regression_lags
+def test_regression_lags_matches_notebook34_calc_partial_regression(ts_1d, field_2d):
+    """regression_lags with a confounder reproduces notebook 34's partial regression."""
+    from apinter.stats import regression_lags
     rng = np.random.default_rng(3)
     index1 = ts_1d.isel(time=slice(0, field_2d.sizes["time"]))
     index2 = index1 + rng.standard_normal(index1.size) * 0.2
     index2 = index2.rename('ts2')
-    max_lag_years = 2
-    shim = calculate_partial_lead_lag_regression(index1, index2, field_2d,
-                                                 max_lag_years=max_lag_years)
-    lags = list(np.arange(-max_lag_years, max_lag_years + 1) * 12)
+    lags = [-24, -12, 0, 12, 24]
+
     ds = regression_lags(field_2d, index1, lags=lags, confounder=index2,
                          compute_significance=False)
-    np.testing.assert_allclose(shim['tamv_beta'], ds['target_beta'].values, rtol=1e-12)
-    np.testing.assert_allclose(shim['tpdv_beta'], ds['confounder_beta'].values, rtol=1e-12)
+
+    # Hand-coded partial regression at lag=0 for cross-check
+    x1 = index1.values
+    x2 = index2.values
+    y = field_2d.values.reshape(field_2d.shape[0], -1)
+    X = np.column_stack([x1, x2, np.ones(len(x1))])
+    beta, *_ = np.linalg.lstsq(X, y, rcond=None)
+    expected_b1 = beta[0].reshape(field_2d.shape[1:])
+    expected_b2 = beta[1].reshape(field_2d.shape[1:])
+
+    np.testing.assert_allclose(ds['target_beta'].sel(lag=0).values,
+                               expected_b1, rtol=1e-12)
+    np.testing.assert_allclose(ds['confounder_beta'].sel(lag=0).values,
+                               expected_b2, rtol=1e-12)
 
 
 # ---------- Indices ----------
