@@ -27,10 +27,7 @@ Pacanowski–Philander eddy diffusion) is **intentionally skipped**.
 ```
 apinter/heat_budget/
 ├── __init__.py              # flat public re-exports + consolidated references
-├── constants.py             # SW_R, SW_D1, SW_D2, MLD_MIN  (subpackage-local only)
-│                            #   Shared physics (EARTH_RADIUS→RE, SEAWATER_DENSITY→RHO,
-│                            #   SEAWATER_HEAT_CAPACITY→CP, CLIM_START/END) are imported
-│                            #   from apinter.config — see "Constants policy" below.
+├── constants.py             # RHO, CP, RE, SW_R, SW_D1, SW_D2, MLD_MIN, CLIM_START/END
 ├── tendency.py              # compute_tendency, compute_anomaly_tendency
 │                            #   (merged: handles both 'time' and 'time_counter')
 ├── mld.py                   # mldavg_varytime, submld_varytime, botmld_varytime
@@ -77,66 +74,14 @@ from apinter.heat_budget import (
 )
 ```
 
-## Constants policy (hybrid: shared in `config`, local in `heat_budget`)
-
-Match the existing pattern: `apinter.circulation.{walker,hadley}` already
-imports `EARTH_RADIUS`, `GRAVITY` from `apinter.config` rather than keeping
-locals. `heat_budget/` follows the same rule.
-
-**Rule of thumb:** a constant belongs in `apinter.config` if it could be
-reused by another subpackage; otherwise it stays local to `heat_budget/`.
-
-### Additions to `apinter/config.py`
+## Config additions (`apinter/config.py`)
 
 ```python
-# Cross-subpackage physics (cited by apinter.heat_budget, possibly others later)
-SEAWATER_DENSITY       = 1025.0   # kg/m³  (reference ρ, Graham 2014 / Matlab ref)
-SEAWATER_HEAT_CAPACITY = 3993.0   # J/(kg·K)  (cp, Matlab ref)
-
-# Project baseline climatology period
-CLIM_START = 1981
-CLIM_END   = 2010
-
-# NEMO mesh for the ORAS5 backend of apinter.heat_budget
 ORAS5_MESH_PATH = ORAS5_DIR / "mesh_mask.nc"
 ```
 
-`EARTH_RADIUS` (already `6.371e6` in `config.py`) is reused; the Matlab
-reference used `6378.0e3` (equatorial radius) — a 0.1 % difference, well
-below ORAS5/ERA5 precision. Adopting the config value strictly improves
-consistency with `apinter.circulation`.
-
-### `apinter/heat_budget/constants.py`
-
-```python
-"""Heat-budget-specific constants.
-
-Shared physics constants are imported from apinter.config:
-    EARTH_RADIUS            (re-exported here as RE for brevity)
-    SEAWATER_DENSITY        (re-exported as RHO)
-    SEAWATER_HEAT_CAPACITY  (re-exported as CP)
-    CLIM_START, CLIM_END    (project baseline climatology)
-"""
-from apinter.config import (
-    EARTH_RADIUS as RE,
-    SEAWATER_DENSITY as RHO,
-    SEAWATER_HEAT_CAPACITY as CP,
-    CLIM_START, CLIM_END,
-)
-
-# Paulson & Simpson (1977) Type I water — only used in surface_flux.py.
-SW_R  = 0.58      # fraction in the visible band
-SW_D1 = 0.35      # attenuation depth for visible [m]
-SW_D2 = 23.0      # attenuation depth for UV/blue [m]
-
-# Numerical guard against division-by-zero in per-MLD normalisations.
-MLD_MIN = 1.0     # m
-```
-
-The short aliases (`RE`, `RHO`, `CP`) are re-exported for use inside the
-subpackage (where they appear in nearly every formula) and for the public
-API. Users importing `from apinter.heat_budget import RHO, CP, RE` get the
-same objects as `from apinter.config import SEAWATER_DENSITY, ...`.
+Used as the default `mesh_path` argument of `NemoGrid()`; explicit override
+remains supported.
 
 ## I/O policy
 
