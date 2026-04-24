@@ -37,6 +37,10 @@ from .advection import advection_ml_rd
 from .entrainment import compute_w_from_continuity, vertadv_ml_rd
 from .ml_tendency import ml_mean_temperature, ml_tendency
 from .nemo_grid import NemoGrid
+from .nemo_mld import (
+    mldavg_varytime as nemo_mldavg,
+    submld_varytime as nemo_submld,
+)
 
 __all__ = [
     'RHO', 'CP', 'RE',
@@ -50,4 +54,5 @@ __all__ = [
     'compute_w_from_continuity', 'vertadv_ml_rd',
     'ml_mean_temperature', 'ml_tendency',
     'NemoGrid',
+    'nemo_mldavg', 'nemo_submld',
 ]
