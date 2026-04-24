@@ -33,6 +33,7 @@ COBE_PATH = DATA_DIR / "COBE" / "cobe.189101_202306.mon.mean.nc"
 
 ORAS5_DIR = DATA_DIR / "ORAS5"
 ORAS5_START_YEAR = 1958
+ORAS5_MESH_PATH = ORAS5_DIR / "mesh_mask.nc"
 
 # ---------------------------------------------------------------------------
 # ERA5 files (monthly, multi-decade, split by time range)
