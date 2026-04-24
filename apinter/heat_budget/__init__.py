@@ -31,6 +31,7 @@ from .constants import (
     CLIM_START, CLIM_END,
 )
 from .tendency import compute_tendency, compute_anomaly_tendency
+from .mld import mldavg_varytime, submld_varytime, botmld_varytime
 
 __all__ = [
     'RHO', 'CP', 'RE',
@@ -38,4 +39,5 @@ __all__ = [
     'MLD_MIN',
     'CLIM_START', 'CLIM_END',
     'compute_tendency', 'compute_anomaly_tendency',
+    'mldavg_varytime', 'submld_varytime', 'botmld_varytime',
 ]
