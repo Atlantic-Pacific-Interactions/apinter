@@ -42,6 +42,11 @@ from .nemo_mld import (
     submld_varytime as nemo_submld,
 )
 from .nemo_advection import advection_ml_rd as nemo_advection_ml_rd
+from .nemo_entrainment import (
+    vertadv_ml_rd as nemo_vertadv_ml_rd,
+    compute_w_from_continuity as nemo_compute_w,
+    submld_w as nemo_submld_w,
+)
 
 __all__ = [
     'RHO', 'CP', 'RE',
@@ -57,4 +62,5 @@ __all__ = [
     'NemoGrid',
     'nemo_mldavg', 'nemo_submld',
     'nemo_advection_ml_rd',
+    'nemo_vertadv_ml_rd', 'nemo_compute_w', 'nemo_submld_w',
 ]
