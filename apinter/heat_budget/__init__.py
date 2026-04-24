@@ -41,6 +41,7 @@ from .nemo_mld import (
     mldavg_varytime as nemo_mldavg,
     submld_varytime as nemo_submld,
 )
+from .nemo_advection import advection_ml_rd as nemo_advection_ml_rd
 
 __all__ = [
     'RHO', 'CP', 'RE',
@@ -55,4 +56,5 @@ __all__ = [
     'ml_mean_temperature', 'ml_tendency',
     'NemoGrid',
     'nemo_mldavg', 'nemo_submld',
+    'nemo_advection_ml_rd',
 ]
