@@ -35,6 +35,7 @@ from .mld import mldavg_varytime, submld_varytime, botmld_varytime
 from .surface_flux import surface_heat_flux
 from .advection import advection_ml_rd
 from .entrainment import compute_w_from_continuity, vertadv_ml_rd
+from .ml_tendency import ml_mean_temperature, ml_tendency
 
 __all__ = [
     'RHO', 'CP', 'RE',
@@ -46,4 +47,5 @@ __all__ = [
     'surface_heat_flux',
     'advection_ml_rd',
     'compute_w_from_continuity', 'vertadv_ml_rd',
+    'ml_mean_temperature', 'ml_tendency',
 ]
