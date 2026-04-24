@@ -50,6 +50,7 @@ dependencies = [
 circulation = ["windspharm"]
 regrid = ["xesmf>=0.8"]
 dev = ["pytest"]
+heat_budget_io = ["cfgrib>=0.9"]
 
 [tool.pytest.ini_options]
 markers = [

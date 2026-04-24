@@ -219,3 +219,74 @@ def load_era5(var: str,
     combined = _normalize_coords(combined)
     logger.info(f"Loaded ERA5 {var}: shape={combined.shape}")
     return combined
+
+
+# ---------------------------------------------------------------------------
+# Surface heat flux GRIB → (qnet, qsw) in W/m²
+# ---------------------------------------------------------------------------
+
+def load_era5_flux(flux_file: Optional[Union[str, Path]] = None,
+                   sim_time: Optional[slice] = None,
+                   ) -> tuple[xr.DataArray, xr.DataArray]:
+    """Load ERA5 surface-flux GRIB and return (qnet, qsw) in W/m².
+
+    ERA5 monthly-mean GRIB files store fluxes as J/m² accumulated over the
+    month. This function converts to W/m² by dividing by the number of
+    seconds in each calendar month, then returns:
+        qnet = ssr + str + slhf + sshf   (net surface heat flux, into ocean)
+        qsw  = ssr                        (net shortwave at the surface)
+
+    Parameters
+    ----------
+    flux_file : Path, optional
+        Default: ``ERA5_DIR / 'era5_q_flux.grib'``.
+    sim_time : slice, optional
+        Passed to ``.sel(time=...)`` after coordinate normalization.
+
+    Returns
+    -------
+    (qnet, qsw) : tuple of xr.DataArray (time, lat, lon).
+
+    Notes
+    -----
+    Requires the ``cfgrib`` optional dependency:
+        ``pip install 'apinter[heat_budget_io]'``
+    """
+    import calendar
+
+    if flux_file is None:
+        flux_file = ERA5_DIR / 'era5_q_flux.grib'
+
+    ds = xr.open_dataset(flux_file, engine='cfgrib')
+
+    rename: Dict[str, str] = {}
+    if 'latitude' in ds.dims:
+        rename['latitude'] = 'lat'
+    if 'longitude' in ds.dims:
+        rename['longitude'] = 'lon'
+    if 'valid_time' in ds.dims:
+        rename['valid_time'] = 'time'
+    if rename:
+        ds = ds.rename(rename)
+
+    seconds_per_month = xr.DataArray(
+        [calendar.monthrange(t.dt.year.item(), t.dt.month.item())[1] * 86400.0
+         for t in ds.time],
+        dims=['time'], coords={'time': ds.time},
+    )
+
+    ssr = ds['ssr'] / seconds_per_month
+    str_ = ds['str'] / seconds_per_month
+    slhf = ds['slhf'] / seconds_per_month
+    sshf = ds['sshf'] / seconds_per_month
+
+    qnet = ssr + str_ + slhf + sshf
+    qsw = ssr
+
+    if sim_time is not None:
+        qnet = qnet.sel(time=sim_time)
+        qsw = qsw.sel(time=sim_time)
+
+    qnet.name = 'qnet'
+    qsw.name = 'qsw'
+    return qnet, qsw
