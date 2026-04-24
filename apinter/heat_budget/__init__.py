@@ -30,10 +30,12 @@ from .constants import (
     MLD_MIN,
     CLIM_START, CLIM_END,
 )
+from .tendency import compute_tendency, compute_anomaly_tendency
 
 __all__ = [
     'RHO', 'CP', 'RE',
     'SW_R', 'SW_D1', 'SW_D2',
     'MLD_MIN',
     'CLIM_START', 'CLIM_END',
+    'compute_tendency', 'compute_anomaly_tendency',
 ]
