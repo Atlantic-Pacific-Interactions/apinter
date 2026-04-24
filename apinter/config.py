@@ -78,6 +78,18 @@ EXTRACTED_FILES = {
 }
 
 # ---------------------------------------------------------------------------
+# NERSC community mirrors (canonical ESGF DRS / LENS / datalake)
+# ---------------------------------------------------------------------------
+# These are read-only directories maintained by other NERSC projects. Paths
+# work on Perlmutter only; loaders in apinter.io.nersc_cmip6 / apinter.io.lens
+# skip gracefully when the directory isn't accessible.
+
+NERSC_CMIP6_DIR        = Path("/global/cfs/cdirs/m3522/cmip6/CMIP6")
+NERSC_CESM1_LENS_DIR   = Path("/global/cfs/cdirs/m2637/LENS")
+NERSC_LOCA2_DIR        = Path("/global/cfs/cdirs/m3522/datalake/LOCA2")
+NERSC_DATALAKE_DIR     = Path("/global/cfs/cdirs/m3522/datalake")
+
+# ---------------------------------------------------------------------------
 # Grid constants (used by apinter.circulation)
 # ---------------------------------------------------------------------------
 
