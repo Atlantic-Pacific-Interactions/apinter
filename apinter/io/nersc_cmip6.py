@@ -21,8 +21,10 @@ Contrast with :func:`apinter.io.cmip6.load_cmip6`, which serves the user's
 from __future__ import annotations
 
 import logging
+import re
+import warnings
 from pathlib import Path
-from typing import Dict, Iterable, List, Optional, Union
+from typing import Dict, Iterable, List, Optional, Tuple, Union
 
 import xarray as xr
 
@@ -47,6 +49,28 @@ _EXPERIMENT_ACTIVITY = {
     # HighResMIP
     'hist-1950': 'HighResMIP', 'highres-future': 'HighResMIP',
 }
+
+
+# Default ``sim_time`` window per experiment — the canonical period each
+# branch was designed to cover. ``None`` (or unmapped experiments) means
+# "load everything the files contain". Pass ``sim_time=`` to override —
+# e.g. ``sim_time=slice('2015-01-01', '2300-12-31')`` for the SSP1-2.6 /
+# SSP5-8.5 long extension.
+_DEFAULT_SIM_TIME: Dict[str, slice] = {
+    'historical': slice('1850-01-01', '2014-12-31'),
+    'ssp119':     slice('2015-01-01', '2100-12-31'),
+    'ssp126':     slice('2015-01-01', '2100-12-31'),
+    'ssp245':     slice('2015-01-01', '2100-12-31'),
+    'ssp370':     slice('2015-01-01', '2100-12-31'),
+    'ssp460':     slice('2015-01-01', '2100-12-31'),
+    'ssp585':     slice('2015-01-01', '2100-12-31'),
+    'ssp534-over': slice('2015-01-01', '2100-12-31'),
+}
+
+
+# CMOR filename time-range token: ``..._<start>-<end>[-clim].nc`` where each
+# of <start>/<end> is YYYY[MM[DD[hhmm[ss]]]] (4/6/8/12/14 digits, equal width).
+_FNAME_DATE_RE = re.compile(r'_(\d{4,14})-(\d{4,14})(?:-clim)?\.nc$')
 
 
 def _resolve_activity(experiment_id: str,
@@ -74,16 +98,125 @@ def _pick_version(var_dir: Path, version: str) -> Optional[Path]:
     return None
 
 
+def _normalize_cmor_date(s: str, *, end: bool) -> str:
+    """Pad a CMOR date token (YYYY..YYYYMMDDhhmmss) to a 14-char string for
+    lexicographic comparison. ``end=True`` pads to the *latest* instant
+    inside the resolution (e.g. month → '31235959'); ``end=False`` pads to
+    the earliest. Day is padded to '31' regardless of month length — this
+    overestimates by at most a couple of days, which only causes us to keep
+    a borderline file and let xarray's ``.sel(time=...)`` filter it precisely."""
+    if len(s) == 4:    return s + ('1231235959' if end else '0101000000')
+    if len(s) == 6:    return s + ('31235959'   if end else '01000000')
+    if len(s) == 8:    return s + ('235959'     if end else '000000')
+    if len(s) == 10:   return s + ('5959'       if end else '0000')
+    if len(s) == 12:   return s + ('59'         if end else '00')
+    if len(s) == 14:   return s
+    raise ValueError(f"Unexpected CMOR date token {s!r}")
+
+
+def _parse_filename_date_range(path: Path) -> Optional[Tuple[str, str]]:
+    """Extract (start, end) as 14-char zero-padded numeric strings from a
+    CMOR-style filename. Returns ``None`` if the filename has no time token
+    (fx/Ofx fixed fields), or if start/end have mismatched widths."""
+    m = _FNAME_DATE_RE.search(path.name)
+    if m is None:
+        return None
+    a, b = m.group(1), m.group(2)
+    if len(a) != len(b):
+        return None
+    try:
+        return _normalize_cmor_date(a, end=False), _normalize_cmor_date(b, end=True)
+    except ValueError:
+        return None
+
+
+def _slice_to_padded_strs(sim_time: slice) -> Optional[Tuple[str, str]]:
+    """Render slice bounds as 14-char zero-padded numeric strings for
+    lexicographic comparison against filename date tokens. Returns ``None``
+    if the slice doesn't have parseable bounds."""
+    def _pad(b, end: bool) -> str:
+        if b is None:
+            return '99999999999999' if end else '00000000000000'
+        digits = ''.join(ch for ch in str(b) if ch.isdigit())
+        if not digits:
+            raise ValueError(f"slice bound {b!r} has no digits")
+        return _normalize_cmor_date(digits, end=end)
+    try:
+        return _pad(sim_time.start, end=False), _pad(sim_time.stop, end=True)
+    except ValueError:
+        return None
+
+
+def _filter_paths_by_sim_time(paths: List[Path],
+                              sim_time: Optional[slice]) -> List[Path]:
+    """Drop NetCDF files whose filename-encoded time range doesn't overlap
+    ``sim_time``. Files with no time token (fx/Ofx) and files whose token we
+    can't parse are kept unconditionally — safer to over-include than skip
+    real data."""
+    if sim_time is None:
+        return paths
+    bounds = _slice_to_padded_strs(sim_time)
+    if bounds is None:
+        return paths
+    sim_start, sim_end = bounds
+    keep: List[Path] = []
+    for p in paths:
+        rng = _parse_filename_date_range(p)
+        if rng is None:
+            keep.append(p)
+            continue
+        f_start, f_end = rng
+        if f_end >= sim_start and f_start <= sim_end:
+            keep.append(p)
+    return keep
+
+
+def _to_datetime64_if_possible(da: xr.DataArray) -> xr.DataArray:
+    """Convert a cftime time index back to ``datetime64[ns]`` for downstream
+    compatibility, when the calendar is Gregorian-like and dates fit in the
+    [1677, 2262] range. Leaves the array untouched if conversion isn't safe
+    (non-standard calendar, dates out of range, missing time coord)."""
+    if 'time' not in da.coords:
+        return da
+    try:
+        from xarray.coding.cftimeindex import CFTimeIndex  # type: ignore
+    except ImportError:
+        return da
+    idx = da.indexes.get('time')
+    if not isinstance(idx, CFTimeIndex):
+        return da
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter('ignore')
+            new_idx = idx.to_datetimeindex()
+    except Exception:
+        return da
+    return da.assign_coords(time=new_idx)
+
+
 def _open_files(paths: List[Path], variable_id: str,
                 sim_time: Optional[slice]) -> xr.DataArray:
-    """Open one or more NetCDF files, concat on time if needed, slice time."""
+    """Open one or more NetCDF files, concat on time if needed, slice time.
+
+    Files are pre-filtered against ``sim_time`` using their CMOR filename
+    date token before opening — this avoids the SSP long-extension trap
+    where the 2101-2300 file overflows ``datetime64[ns]`` and forces a
+    cftime fallback that ``combine_by_coords`` then refuses to merge with
+    the 2015-2100 (datetime64) file. ``use_cftime=True`` is set as a safety
+    net for the case where the user *does* request the long extension."""
+    paths = _filter_paths_by_sim_time(paths, sim_time)
+    if not paths:
+        raise FileNotFoundError(
+            f"No files overlap sim_time={sim_time!r}"
+        )
     if len(paths) == 1:
-        ds = xr.open_dataset(paths[0])
+        ds = xr.open_dataset(paths[0], use_cftime=True)
     else:
         ds = xr.open_mfdataset(
             [str(p) for p in paths],
             combine='by_coords',
             parallel=False,
+            use_cftime=True,
         )
     # Select the requested variable explicitly — some CMIP6 NetCDFs list
     # ``time_bnds`` (a datetime64 array) as a data_var, so don't just grab
@@ -95,7 +228,7 @@ def _open_files(paths: List[Path], variable_id: str,
     da = ds[variable_id]
     if sim_time is not None and 'time' in da.dims:
         da = da.sel(time=sim_time)
-    return da
+    return _to_datetime64_if_possible(da)
 
 
 def list_nersc_cmip6_models(experiment_id: str,
@@ -175,6 +308,12 @@ def load_nersc_cmip6(variable_id: str,
     version : str            'latest' picks the newest ``vYYYYMMDD``; or
                              pass a specific version string.
     sim_time : slice, optional
+        Time window to load. Defaults to the canonical period for the
+        experiment: 1850-2014 for ``historical``, 2015-2100 for any SSP.
+        Pass an explicit slice to override — e.g.
+        ``sim_time=slice('2015-01-01', '2300-12-31')`` for the SSP1-2.6 /
+        SSP5-8.5 long extension, or ``sim_time=None`` (after manually
+        passing it through) for "load whatever is on disk".
     base_path : Path-like
 
     Returns
@@ -185,6 +324,8 @@ def load_nersc_cmip6(variable_id: str,
     """
     base_path = Path(base_path)
     activity = _resolve_activity(experiment_id, activity_id)
+    if sim_time is None:
+        sim_time = _DEFAULT_SIM_TIME.get(experiment_id)
 
     if source_ids is None:
         source_ids = list_nersc_cmip6_models(
@@ -247,6 +388,8 @@ def load_nersc_cmip6_ensemble(variable_id: str,
     """
     base_path = Path(base_path)
     activity = _resolve_activity(experiment_id, activity_id)
+    if sim_time is None:
+        sim_time = _DEFAULT_SIM_TIME.get(experiment_id)
 
     # Find member_id directories under the model
     model_root = _find_model_dir(base_path, activity, source_id)
