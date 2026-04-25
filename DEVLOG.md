@@ -25,6 +25,97 @@ pytest --pyargs apinter.tests -m slow
 
 ---
 
+## 2026-04-24 — apinter.heat_budget subpackage (MLD heat budget, dual backend)
+
+### Added
+
+- **`apinter.heat_budget`** — new subpackage porting the mixed-layer heat
+  budget code from the `Atlantic-Pacific-Interaction-MHW` project. Two
+  backends:
+  - **Regular lat/lon grid** (approximate spherical operators) for any
+    regridded field — `mldavg_varytime`, `submld_varytime`,
+    `botmld_varytime`, `advection_ml_rd`, `vertadv_ml_rd`,
+    `compute_w_from_continuity`, `surface_heat_flux`,
+    `ml_mean_temperature`, `ml_tendency`, `compute_tendency`,
+    `compute_anomaly_tendency`.
+  - **Native NEMO ORCA C-grid** (exact metrics from `mesh_mask.nc`) for
+    ORAS5 — `NemoGrid`, `nemo_mldavg`, `nemo_submld`,
+    `nemo_advection_ml_rd`, `nemo_vertadv_ml_rd`, `nemo_compute_w`,
+    `nemo_submld_w`. Implements Reynolds decomposition following
+    Graham et al. (2014) and depth-weighted MLD averaging following
+    Stevenson et al. (2017).
+  - **Diffusion module is intentionally skipped** — the upstream
+    `diffusion.py` (horizontal Laplacian + Pacanowski-Philander vertical
+    diffusion) was not verified and is not part of this port.
+- **`apinter.io.era5.load_era5_flux`** — reads an ERA5 surface-flux GRIB
+  and returns `(qnet, qsw)` in W/m², converting monthly-accumulated
+  J/m² via each month's calendar day count.
+- **`apinter.config.ORAS5_MESH_PATH`** — default path for NEMO grid
+  metrics, used by `NemoGrid()`. Explicit override remains supported.
+
+### Tests added (`apinter/tests/`)
+
+| File | Tests | Notes |
+|---|---:|---|
+| `test_heat_budget_constants.py` | 3 | Physical constants in expected ranges; config mesh path exposed. |
+| `test_heat_budget_tendency.py` | 4 | Central difference on `time` and `time_counter`; anomaly removes seasonal cycle. |
+| `test_heat_budget_mld.py` | 5 | Weighted avg, sub-/bot-MLD sampling, NaN outside ML, `search_type` validation. |
+| `test_heat_budget_advection.py` | 2 | Returns all 12 keys; Reynolds terms sum to `u·∂T/∂x`. |
+| `test_heat_budget_entrainment.py` | 3 | Non-divergent flow → w = 0; returns 6 keys; masks invalid MLD. |
+| `test_heat_budget_surface_flux.py` | 2 | No SW → `qnet/(ρcpH)`; SW-penetration matches Paulson–Simpson. |
+| `test_heat_budget_ml_tendency.py` | 3 | Uniform T, linear T(z), monthly centered tendency. |
+| `test_heat_budget_nemo.py` | 5 | `NemoGrid` metric load + operators + MLD utilities on the mesh (auto-skip). |
+| `test_heat_budget_pipeline.py` | 1 | End-to-end ORAS5 → ML-averaged T + advection + entrainment, 3-month slab (auto-skip). |
+
+28 new tests total. Synthetic tests run in <2 s; NEMO and pipeline smoke
+tests auto-skip when `apinter.config.ORAS5_DIR` / `ORAS5_MESH_PATH` are
+not accessible. On Perlmutter the pipeline test takes ~4–5 min on a
+login node (Lustre I/O dominates).
+
+### Packaging
+
+- **`pyproject.toml`** — adds `heat_budget_io = ["cfgrib>=0.9"]` optional
+  extra. The subpackage's core math adds no new required dependencies.
+
+### Workflow sketch — ORAS5 native grid (C-grid backend)
+
+```python
+from apinter.io import load_oras5, load_era5_flux
+from apinter.heat_budget import (
+    NemoGrid,
+    nemo_mldavg, nemo_submld,
+    nemo_advection_ml_rd, nemo_vertadv_ml_rd,
+    nemo_compute_w, nemo_submld_w,
+)
+
+grid = NemoGrid()                                  # default mesh_mask path
+thetao = load_oras5('thetao').load()               # eager-materialise
+uo, vo = load_oras5('uo').load(), load_oras5('vo').load()
+mld    = load_oras5('mld030').load()
+qnet, qsw = load_era5_flux()
+
+Tmld  = nemo_mldavg(mld, thetao, grid.e3t_0)
+Tsub  = nemo_submld(mld, thetao, grid.e3t_0)
+umld_U = nemo_mldavg(mld, uo, grid.e3t_0)
+vmld_V = nemo_mldavg(mld, vo, grid.e3t_0)
+umld_T = grid.u_to_T(umld_U)
+vmld_T = grid.v_to_T(vmld_V)
+w3d   = nemo_compute_w(uo, vo, grid)
+wsub  = nemo_submld_w(mld, w3d, grid.e3t_0)
+
+adv = nemo_advection_ml_rd(Tmld, umld_U, vmld_V, grid)
+ent = nemo_vertadv_ml_rd(mld, umld_T, vmld_T, Tmld, Tsub, wsub, grid)
+```
+
+### Known limitations
+
+- The NEMO-C-grid backend's vectorised `xarray.isel` does not work on
+  dask-backed arrays (xarray limitation). Callers must `.load()` the
+  ORAS5 slab into memory first (the smoke test does this). The
+  `apinter.heat_budget` math itself is bit-for-bit identical to the
+  upstream verified port; we did not add `.compute()` shims to the
+  production code.
+
 ## 2026-04-23 — NERSC central-mirror access + xesmf regrid + ocean coverage
 
 ### Added
