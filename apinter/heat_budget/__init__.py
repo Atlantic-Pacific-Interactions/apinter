@@ -47,6 +47,7 @@ from .nemo_entrainment import (
     compute_w_from_continuity as nemo_compute_w,
     submld_w as nemo_submld_w,
 )
+from .pipeline import compute_budget_regular, compute_budget_nemo
 
 __all__ = [
     'RHO', 'CP', 'RE',
@@ -63,4 +64,5 @@ __all__ = [
     'nemo_mldavg', 'nemo_submld',
     'nemo_advection_ml_rd',
     'nemo_vertadv_ml_rd', 'nemo_compute_w', 'nemo_submld_w',
+    'compute_budget_regular', 'compute_budget_nemo',
 ]
