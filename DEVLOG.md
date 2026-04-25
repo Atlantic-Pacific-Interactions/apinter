@@ -116,6 +116,30 @@ ent = nemo_vertadv_ml_rd(mld, umld_T, vmld_T, Tmld, Tsub, wsub, grid)
   upstream verified port; we did not add `.compute()` shims to the
   production code.
 
+### Added (later same day) — pipeline convenience
+
+- **`apinter.heat_budget.compute_budget_regular`** and
+  **`apinter.heat_budget.compute_budget_nemo`** — one-call ML heat-budget
+  pipelines that take pre-loaded DataArrays and return one `xr.Dataset`
+  bundling 24 fields (5 intermediates + 12 advection + 6 entrainment +
+  1 surface flux) with provenance `attrs` (`backend`, `yrclim`,
+  `description`). Internally orchestrates the existing low-level
+  `*_ml_rd`, `*_mldavg`, `*_submld`, `compute_w_from_continuity`,
+  `surface_heat_flux` calls; for the NEMO backend it also handles the
+  U-→T and V-→T interpolation needed by the entrainment formula.
+  Spec: `docs/superpowers/specs/2026-04-24-heat-budget-pipeline-design.md`.
+
+  ```python
+  ds = compute_budget_nemo(thetao, uo, vo, mld, qnet, qsw, grid,
+                            yrclim=[2000, 2009])
+  ds.to_netcdf('budget.nc')
+  ```
+
+- **Tests**: 2 new synthetic tests in
+  `apinter/tests/test_heat_budget_pipeline_regular.py`. Existing
+  `test_heat_budget_pipeline.py` refactored to use `compute_budget_nemo`
+  (single call replaces the prior 12-line manual orchestration).
+
 ## 2026-04-23 — NERSC central-mirror access + xesmf regrid + ocean coverage
 
 ### Added
