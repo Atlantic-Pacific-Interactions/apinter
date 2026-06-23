@@ -4,6 +4,8 @@ Compares against the legacy Paper_1/src and ./src implementations for a
 bit-level parity check where possible.
 """
 import numpy as np
+import pandas as pd
+import xarray as xr
 
 
 def test_detrend_dim_matches_legacy(ts_1d):
@@ -68,3 +70,19 @@ def test_wgt_areaave_matches_legacy(field_2d):
         old(field_2d, -10, 10, 100, 200).values,
         rtol=1e-12,
     )
+
+
+def test_standardize_time_to_month_start_aligns_mid_month_timestamps():
+    from apinter.processing import standardize_time_to_month_start
+    time = pd.to_datetime(["1980-01-15", "1980-02-15", "1980-03-15"])
+    da = xr.DataArray([1.0, 2.0, 3.0], coords={"time": time}, dims=["time"])
+    out = standardize_time_to_month_start(da)
+    expected = pd.to_datetime(["1980-01-01", "1980-02-01", "1980-03-01"])
+    np.testing.assert_array_equal(out.time.values, expected.values)
+
+
+def test_standardize_time_to_month_start_no_time_coord_passthrough():
+    from apinter.processing import standardize_time_to_month_start
+    da = xr.DataArray([1.0, 2.0, 3.0], dims=["x"])
+    out = standardize_time_to_month_start(da)
+    np.testing.assert_array_equal(out.values, da.values)

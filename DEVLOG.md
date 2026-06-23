@@ -25,6 +25,48 @@ pytest --pyargs apinter.tests -m slow
 
 ---
 
+## 2026-06-20 — `pointwise_regression` + `min_variance` (driven by E3SMS migration)
+
+### Added
+
+- **`apinter.stats.pointwise_regression(x_field, y_field, compute_significance=True,
+  min_variance=None, min_samples=10)`** — grid-cell-local regression where
+  BOTH operands vary spatially (e.g. local SST' vs local precip' at the same
+  pixel), as opposed to `regression_lags`'s "one shared 1D index vs a spatial
+  field." `beta = cov(x,y)/var(x)` per pixel; significance via the new
+  `calculate_neff_pointwise` (Bretherton/Pyper-Peterman effective DOF,
+  computed per pixel from that pixel's own x/y autocorrelation).
+- **`apinter.stats.significance.calculate_neff_pointwise`** — sibling to
+  `calculate_neff_vectorized` for the paired-pointwise case (predictor
+  autocorrelation indexed per-pixel instead of broadcast from one shared
+  index).
+- **`min_variance` parameter on `regression_lags`** — skips a lag entirely
+  when the (shared) predictor's variance over valid samples is at/below the
+  threshold, instead of producing a blown-up slope.
+- **`apinter.processing.standardize_time_to_month_start`** — aligns a
+  DataArray's time coordinate to month-start, ported from
+  `E3SMS/scripts/moisture_budget/calc_moisture_budget_decomposition.py`.
+
+### Why
+
+E3SMS's `calc_pointwise_regression` (duplicated across 5 files) does a
+grid-cell-local regression of moisture-budget terms on local SST, with a
+nominal-DOF (n-2) significance test and a `var_x > 1e-12` guard against
+CMIP6 lon=0/360 regrid-seam artifacts. Migrating it to `apinter` needed both
+gaps closed upstream (not a local E3SMS wrapper), since they're generically
+useful across `Paper_1`/`Paper_2`/`SSP` too.
+
+### Tests
+
+`apinter/tests/test_stats.py`: `beta` parity against a direct `cov/var`
+computation (rtol=1e-12), `p_value` in [0,1], `min_variance` masks only the
+degenerate pixel/lag and leaves others unchanged, and an explicit check that
+effective-DOF p-values are `>=` nominal-DOF p-values for autocorrelated data.
+`apinter/tests/test_processing.py`: month-start alignment + no-time-coord
+passthrough.
+
+---
+
 ## 2026-04-24 — apinter.heat_budget subpackage (MLD heat budget, dual backend)
 
 ### Added
