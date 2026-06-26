@@ -54,6 +54,10 @@ CMIP6_VARS: Dict[str, Dict] = {
     'ta':     {'subdir': '1850-2015-atmos', 'ext': 'nc'},
     'thetao': {'subdir': 'ocean',           'ext': 'zarr'},
     'tauu':   {'subdir': 'atmos',           'ext': 'zarr'},
+    'hus':    {'subdir': '1850-2015-atmos', 'ext': 'zarr'},
+    'huss':   {'subdir': '1850-2015-atmos', 'ext': 'zarr'},
+    'sfcWind': {'subdir': '1850-2015-atmos', 'ext': 'zarr'},
+    'hfls':   {'subdir': '1850-2015-atmos', 'ext': 'zarr'},
 }
 
 # ---------------------------------------------------------------------------

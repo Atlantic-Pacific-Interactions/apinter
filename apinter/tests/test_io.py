@@ -38,7 +38,8 @@ from apinter.io import (
 # =============================================================================
 
 def test_cmip6_vars_spec_shape():
-    expected = {'ts', 'wap', 'zg', 'psl', 'pr', 'zos', 'ua', 'va', 'thetao', 'tauu'}
+    expected = {'ts', 'wap', 'zg', 'psl', 'pr', 'zos', 'ua', 'va', 'ta', 'thetao',
+               'tauu', 'hus', 'huss', 'sfcWind', 'hfls'}
     assert set(CMIP6_VARS) == expected
     for var, spec in CMIP6_VARS.items():
         assert 'subdir' in spec and 'ext' in spec
@@ -178,6 +179,19 @@ def test_load_cmip6_masks_extreme_fill_values(tmp_path):
     pr = out['FAKE-MODEL']
     assert np.isnan(pr.values).sum() == 2
     assert np.nanmax(np.abs(pr.values)) < 1e10
+
+
+@pytest.mark.parametrize("var", ["hus", "huss", "sfcWind", "hfls"])
+def test_load_cmip6_moisture_budget_vars_one_year(_cmip6_models, var):
+    """hus/huss/sfcWind/hfls — needed by the moisture-budget/evap-decomposition
+    pipelines, not just the original mean-state/regression variable set."""
+    out = load_cmip6(var, sim_time=slice('2000', '2000'), models=_cmip6_models[:5])
+    if not out:
+        pytest.skip(f"no {var}.zarr found for the first 5 models")
+    model = next(iter(out))
+    da = out[model]
+    assert 'lat' in da.dims and 'lon' in da.dims and 'time' in da.dims
+    assert da.sizes['time'] == 12
 
 
 def test_load_cmip6_sst_compat_wrapper(_cmip6_models):
