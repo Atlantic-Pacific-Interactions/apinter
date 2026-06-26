@@ -154,6 +154,32 @@ def test_load_cmip6_ts_one_year(_cmip6_models):
     assert -10 < finite.min() and finite.max() < 40
 
 
+def test_load_cmip6_masks_extreme_fill_values(tmp_path):
+    """Some models (e.g. GISS) write ~1e27 fill values instead of NaN; these
+    must be masked before any arithmetic, or they survive as finite-but-wrong
+    values (silently blown-up regression slopes downstream)."""
+    import pandas as pd
+
+    time = pd.date_range('2000-01-01', periods=2, freq='MS')
+    lat = np.array([-5.0, 5.0])
+    lon = np.array([0.0, 180.0])
+    data = np.array([[[1.0, 2.0], [3.0, -1e27]],
+                     [[4.0, 5.0], [1e30, 6.0]]])
+    ds = xr.Dataset(
+        {'pr': (['time', 'lat', 'lon'], data)},
+        coords={'time': time, 'lat': lat, 'lon': lon},
+    )
+    model_dir = tmp_path / 'FAKE-MODEL' / '1850-2015-atmos'
+    model_dir.mkdir(parents=True)
+    ds.to_zarr(model_dir / 'pr.zarr')
+
+    out = load_cmip6('pr', sim_time=slice('2000', '2000'),
+                     models=['FAKE-MODEL'], base_path=tmp_path)
+    pr = out['FAKE-MODEL']
+    assert np.isnan(pr.values).sum() == 2
+    assert np.nanmax(np.abs(pr.values)) < 1e10
+
+
 def test_load_cmip6_sst_compat_wrapper(_cmip6_models):
     """load_cmip6_sst wrapper matches load_cmip6('ts')."""
     a = load_cmip6('ts', sim_time=slice('2000', '2000'), models=_cmip6_models[:2])
