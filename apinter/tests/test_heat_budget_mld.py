@@ -72,6 +72,22 @@ def test_botmld_returns_last_level_inside_ml():
     assert np.allclose(thickness.values, 5.0)
 
 
+def test_submld_does_not_leak_lev_coordinate_when_mld_varies_spatially():
+    """Vectorized isel(lev=target_idx) used to attach the selected level's own
+    `lev` value as a new (time, lat, lon) coordinate. Two submld outputs with
+    spatially-varying MLD pick different levels per pixel, so a leaked `lev`
+    coordinate would conflict if the outputs were ever combined into one
+    Dataset (this broke compute_budget_nemo's _bundle merge)."""
+    temp, lev = _build_temp_stack()
+    mld = xr.DataArray(
+        np.array([[[10.0, 20.0], [30.0, 40.0]]] * 3),
+        coords={'time': temp.time, 'lat': temp.lat, 'lon': temp.lon},
+        dims=['time', 'lat', 'lon'],
+    )
+    Tsub = submld_varytime(mld, temp, z=temp.lev)
+    assert 'lev' not in Tsub.coords
+
+
 def test_submld_rejects_unknown_search_type():
     temp, lev = _build_temp_stack()
     mld = xr.DataArray(np.full((3, 2, 2), 20.0),

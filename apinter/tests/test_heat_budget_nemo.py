@@ -70,6 +70,36 @@ def test_nemo_mldavg_depth_weighted_on_synthetic_column(grid):
     assert np.allclose(Tmld.values, 15.0)
 
 
+def test_nemo_submld_does_not_leak_z_coordinate_when_mld_varies_spatially():
+    """Vectorized isel(z=target_idx) used to attach the selected level's own
+    `z` coordinate value as a new (time, y, x) coordinate. Tsub and wsub pick
+    different levels per pixel when MLD varies spatially, so a leaked `z`
+    coordinate would conflict when bundled into one Dataset (this broke
+    compute_budget_nemo's _bundle merge). Synthetic — no real mesh needed."""
+    from apinter.heat_budget.nemo_mld import submld_varytime as nemo_submld
+    from apinter.heat_budget.nemo_entrainment import submld_w as nemo_submld_w
+
+    nz, ny, nx = 5, 2, 2
+    time = pd.date_range('2000-01-01', periods=1, freq='MS')
+    e3t = xr.DataArray(np.full(nz, 10.0), dims=['z'], coords={'z': np.arange(nz)})
+    field = xr.DataArray(
+        np.broadcast_to(np.arange(nz, dtype=float)[None, :, None, None],
+                        (1, nz, ny, nx)).copy(),
+        coords={'time': time, 'z': np.arange(nz)}, dims=['time', 'z', 'y', 'x'],
+    )
+    mld = xr.DataArray(np.array([[[10.0, 20.0], [30.0, 40.0]]]),
+                       coords={'time': time}, dims=['time', 'y', 'x'])
+
+    Tsub = nemo_submld(mld, field, e3t)
+    wsub = nemo_submld_w(mld, field, e3t)
+    assert 'z' not in Tsub.coords
+    assert 'z' not in wsub.coords
+    # Confirms the two would actually have conflicted pre-fix: different
+    # pixels pick different source levels for a spatially-varying MLD.
+    ds = xr.Dataset({'Tsub': Tsub, 'wsub': wsub})  # must not raise MergeError
+    assert 'Tsub' in ds and 'wsub' in ds
+
+
 def test_nemo_submld_returns_first_level_below_mld(grid):
     """Profile T(k) = k; first level with centre depth > MLD is returned."""
     from apinter.heat_budget import nemo_submld

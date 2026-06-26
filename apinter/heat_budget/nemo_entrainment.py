@@ -82,7 +82,11 @@ def submld_w(mld, w, e3t):
     masked_idx = xr.where(condition, idx_broadcast, nz)
     target_idx = masked_idx.min(dim='z').clip(0, nz - 1).astype(int)
 
-    result = w.isel(z=target_idx)
+    # Vectorized isel with a per-pixel indexer attaches the selected level's
+    # own `z` coordinate value as a new (time, y, x) non-dim coordinate;
+    # drop it — Tsub and wsub generally pick different levels per pixel, so
+    # a shared `z` coordinate would conflict when bundled together.
+    result = w.isel(z=target_idx).drop_vars('z', errors='ignore')
     result = xr.where(has_valid, result, np.nan)
 
     return result

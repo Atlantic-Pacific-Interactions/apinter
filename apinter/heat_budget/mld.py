@@ -79,7 +79,11 @@ def submld_varytime(mld, field, z, search_type='first'):
         raise ValueError("search_type must be 'first' or 'last'")
 
     target_idx = target_idx.clip(0, nlev - 1).astype(int)
-    result = field.isel(lev=target_idx)
+    # Vectorized isel with a per-pixel indexer attaches the selected level's
+    # own `lev` coordinate value as a new (time, ...) non-dim coordinate;
+    # drop it — two sub-MLD fields generally pick different levels per pixel,
+    # so a shared `lev` coordinate would conflict when bundled together.
+    result = field.isel(lev=target_idx).drop_vars('lev', errors='ignore')
     return xr.where(has_valid, result, np.nan)
 
 
