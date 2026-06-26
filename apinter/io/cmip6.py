@@ -19,6 +19,7 @@ import logging
 from pathlib import Path
 from typing import Dict, Iterable, List, Optional, Union
 
+import numpy as np
 import xarray as xr
 
 from apinter.config import CMIP6_DIR, LSMSK_PATH
@@ -50,8 +51,13 @@ CMIP6_VARS: Dict[str, Dict] = {
                'ocean_mask': True},
     'ua':     {'subdir': '1850-2015-atmos', 'ext': 'nc'},
     'va':     {'subdir': '1850-2015-atmos', 'ext': 'nc'},
+    'ta':     {'subdir': '1850-2015-atmos', 'ext': 'nc'},
     'thetao': {'subdir': 'ocean',           'ext': 'zarr'},
     'tauu':   {'subdir': 'atmos',           'ext': 'zarr'},
+    'hus':    {'subdir': '1850-2015-atmos', 'ext': 'zarr'},
+    'huss':   {'subdir': '1850-2015-atmos', 'ext': 'zarr'},
+    'sfcWind': {'subdir': '1850-2015-atmos', 'ext': 'zarr'},
+    'hfls':   {'subdir': '1850-2015-atmos', 'ext': 'zarr'},
 }
 
 # ---------------------------------------------------------------------------
@@ -163,6 +169,10 @@ def load_cmip6(var: str,
 
             da = ds[var].squeeze(drop=True).sel(time=sim_time)
             da = _rename_coords(da)
+            # Some models (e.g. GISS) use extreme fill values (~1e27) instead
+            # of NaN; mask before any arithmetic so they can't survive as
+            # finite-but-wrong values downstream.
+            da = da.where(np.abs(da) < 1e10)
 
             if level is not None and 'level' in da.dims:
                 da = da.sel(level=level)
