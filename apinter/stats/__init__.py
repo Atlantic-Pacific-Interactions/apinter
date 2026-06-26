@@ -3,6 +3,10 @@
 Regression and correlation entry points:
   - regression_lags(field, target_index, lags, confounder=None, ...):
       field-on-index regression (simple or partial), concurrent or multi-lag.
+      target_index is a single 1D predictor shared by every pixel.
+  - pointwise_regression(x_field, y_field, ...):
+      grid-cell-local regression — BOTH operands vary spatially; each pixel
+      uses only its own (x(t), y(t)) pair (e.g. local SST' vs local precip').
   - correlation_lags(ts1, ts2, max_lag=12):
       1D-on-1D lead-lag Pearson correlation (no internal time selection).
   - mmm_correlation_lags(per_model_results, exclude=None):
@@ -19,6 +23,7 @@ from .trends import (
 )
 from .regression import (
     regression_lags,
+    pointwise_regression,
     correlation_lags,
     mmm_correlation_lags,
 )
@@ -27,6 +32,7 @@ from .significance import (
     effective_degrees_of_freedom,
     autocorrelation_numpy_vectorized,
     calculate_neff_vectorized,
+    calculate_neff_pointwise,
 )
 
 __all__ = [
@@ -40,6 +46,7 @@ __all__ = [
     "all_seasonal_trends",
     # regression + correlation
     "regression_lags",
+    "pointwise_regression",
     "correlation_lags",
     "mmm_correlation_lags",
     # significance
@@ -47,4 +54,5 @@ __all__ = [
     "effective_degrees_of_freedom",
     "autocorrelation_numpy_vectorized",
     "calculate_neff_vectorized",
+    "calculate_neff_pointwise",
 ]

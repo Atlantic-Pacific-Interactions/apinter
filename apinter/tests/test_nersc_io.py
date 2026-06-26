@@ -95,6 +95,83 @@ def test_load_nersc_cmip6_rejects_unknown_experiment(_has_nersc_cmip6):
         load_nersc_cmip6(variable_id='ts', experiment_id='not_an_experiment')
 
 
+# ---------- filename date-range parser (no I/O) ----------
+
+def test_parse_filename_date_range_monthly_yearly_daily_subdaily():
+    from pathlib import Path
+    from apinter.io.nersc_cmip6 import _parse_filename_date_range
+    cases = {
+        'ts_Amon_X_historical_r1i1p1f1_gn_185001-201412.nc':
+            ('18500101000000', '20141231235959'),
+        'pr_Eday_X_ssp585_r1i1p1f1_gr_19790101-20141231.nc':
+            ('19790101000000', '20141231235959'),
+        'tas_Aday_X_ssp585_r1i1p1f1_gn_18500101010000-20141231230000.nc':
+            ('18500101010000', '20141231230000'),
+        'sst_Oyr_X_piControl_r1i1p1f1_gn_0950-1099.nc':
+            ('09500101000000', '10991231235959'),
+    }
+    for fname, expected in cases.items():
+        assert _parse_filename_date_range(Path(fname)) == expected, fname
+
+    # fx / no time token → None
+    assert _parse_filename_date_range(
+        Path('sftlf_fx_X_historical_r1i1p1f1_gn.nc')) is None
+    assert _parse_filename_date_range(
+        Path('sftlf_fx_X_historical_r1i1p1f1_gr1.nc')) is None
+
+
+def test_filter_paths_by_sim_time_drops_post_2100_extension():
+    """ACCESS-CM2 ssp126 ships 2015-2100 + 2101-2300; the default ssp window
+    must drop the long-extension file so ``open_mfdataset`` sees only the
+    2015-2100 file (no cftime / datetime64 mixed-type combine)."""
+    from pathlib import Path
+    from apinter.io.nersc_cmip6 import _filter_paths_by_sim_time
+    paths = [
+        Path('ts_Amon_ACCESS-CM2_ssp126_r1i1p1f1_gn_201501-210012.nc'),
+        Path('ts_Amon_ACCESS-CM2_ssp126_r1i1p1f1_gn_210101-230012.nc'),
+    ]
+    kept = _filter_paths_by_sim_time(paths, slice('2015-01-01', '2100-12-31'))
+    assert [p.name for p in kept] == [
+        'ts_Amon_ACCESS-CM2_ssp126_r1i1p1f1_gn_201501-210012.nc'
+    ]
+    # Long-extension request keeps both
+    kept_ext = _filter_paths_by_sim_time(paths, slice('2015-01-01', '2300-12-31'))
+    assert len(kept_ext) == 2
+
+
+# ---------- experiment-aware default sim_time ----------
+
+def test_load_nersc_cmip6_default_sim_time_historical(_has_nersc_cmip6):
+    """Default sim_time for 'historical' is 1850-2014 — never returns dates
+    past 2014 even if the source file extends further."""
+    out = load_nersc_cmip6(
+        variable_id='ts', experiment_id='historical',
+        source_ids=['ACCESS-CM2'],
+    )
+    if 'ACCESS-CM2' not in out:
+        pytest.skip("ACCESS-CM2 historical not on this mirror")
+    da = out['ACCESS-CM2']
+    yr = xr.DataArray(da.time).dt.year
+    assert int(yr.min()) >= 1850
+    assert int(yr.max()) <= 2014
+
+
+def test_load_nersc_cmip6_default_sim_time_ssp126_no_long_extension(_has_nersc_cmip6):
+    """ssp126 default window is 2015-2100 — must succeed even though the
+    mirror also ships a 2101-2300 file (regression test for the cftime /
+    datetime64 mixed-type combine bug)."""
+    out = load_nersc_cmip6(
+        variable_id='ts', experiment_id='ssp126',
+        source_ids=['ACCESS-CM2'],
+    )
+    if 'ACCESS-CM2' not in out:
+        pytest.skip("ACCESS-CM2 ssp126 not on this mirror")
+    da = out['ACCESS-CM2']
+    yr = xr.DataArray(da.time).dt.year
+    assert int(yr.min()) >= 2015
+    assert int(yr.max()) <= 2100
+
+
 # =============================================================================
 # CESM1-LE (m2637/LENS)
 # =============================================================================

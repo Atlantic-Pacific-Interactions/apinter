@@ -4,6 +4,8 @@ Compares against the legacy Paper_1/src and ./src implementations for a
 bit-level parity check where possible.
 """
 import numpy as np
+import pandas as pd
+import xarray as xr
 
 
 def test_detrend_dim_matches_legacy(ts_1d):
@@ -68,3 +70,45 @@ def test_wgt_areaave_matches_legacy(field_2d):
         old(field_2d, -10, 10, 100, 200).values,
         rtol=1e-12,
     )
+
+
+def test_standardize_time_to_month_start_aligns_mid_month_timestamps():
+    from apinter.processing import standardize_time_to_month_start
+    time = pd.to_datetime(["1980-01-15", "1980-02-15", "1980-03-15"])
+    da = xr.DataArray([1.0, 2.0, 3.0], coords={"time": time}, dims=["time"])
+    out = standardize_time_to_month_start(da)
+    expected = pd.to_datetime(["1980-01-01", "1980-02-01", "1980-03-01"])
+    np.testing.assert_array_equal(out.time.values, expected.values)
+
+
+def test_standardize_time_to_month_start_no_time_coord_passthrough():
+    from apinter.processing import standardize_time_to_month_start
+    da = xr.DataArray([1.0, 2.0, 3.0], dims=["x"])
+    out = standardize_time_to_month_start(da)
+    np.testing.assert_array_equal(out.values, da.values)
+
+
+def test_load_ocean_mask_real_file_shape_and_values():
+    from apinter.processing.masks import LSMASK_PATH, load_ocean_mask
+    import os
+    if not os.path.exists(LSMASK_PATH):
+        import pytest
+        pytest.skip(f"{LSMASK_PATH} not present on this filesystem")
+    mask = load_ocean_mask()
+    assert {'lat', 'lon'} <= set(mask.dims)
+    assert np.all(np.diff(mask.lat.values) > 0)  # sort_lat=True default
+    vals = np.unique(mask.values)
+    assert set(vals.tolist()) <= {0.0, 1.0}
+
+
+def test_apply_ocean_mask_masks_land_keeps_ocean():
+    from apinter.processing import apply_ocean_mask
+    lat = np.array([0., 10., 20.])
+    lon = np.array([0., 10., 20.])
+    mask = xr.DataArray([[1., 0., 1.], [0., 1., 1.], [1., 1., 0.]],
+                         coords={'lat': lat, 'lon': lon}, dims=['lat', 'lon'])
+    field = xr.DataArray(np.ones((3, 3)) * 5.0,
+                          coords={'lat': lat, 'lon': lon}, dims=['lat', 'lon'])
+    out = apply_ocean_mask(field, mask=mask)
+    np.testing.assert_array_equal(np.isnan(out.values), mask.values == 0)
+    np.testing.assert_allclose(out.values[mask.values == 1], 5.0)

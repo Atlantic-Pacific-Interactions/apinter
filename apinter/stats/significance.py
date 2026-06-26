@@ -1,11 +1,14 @@
 """Autocorrelation and effective degrees of freedom.
 
-Two families:
+Three families:
   - Scalar (Pyper & Peterman 1998): autocorrelation_function + effective_degrees_of_freedom.
     Used for significance of point-wise or time-series correlations.
-  - Vectorized (Bretherton et al. 1999 integral time scale):
+  - Vectorized, shared 1D predictor (Bretherton et al. 1999 integral time scale):
     autocorrelation_numpy_vectorized + calculate_neff_vectorized. Used by
-    regression_lags for spatial-map significance.
+    regression_lags for "one index vs many pixels" spatial-map significance.
+  - Vectorized, paired pointwise predictor: calculate_neff_pointwise. Used by
+    pointwise_regression for "local x vs local y at the same pixel"
+    significance (the predictor varies by pixel too).
 """
 import numpy as np
 import xarray as xr
@@ -140,6 +143,44 @@ def calculate_neff_vectorized(x_series: np.ndarray,
     sum_term = np.zeros(y_field.shape[1])
     for j in range(1, max_lag + 1):
         sum_term += (n - j) / n * rho_xx[j, 0] * rho_yy[j, :]
+
+    inv_ne = (1.0 / n) + (2.0 / n) * sum_term
+    with np.errstate(divide='ignore', invalid='ignore'):
+        ne = np.clip(1.0 / inv_ne, 2.0, float(n))
+    return ne
+
+
+def calculate_neff_pointwise(x_field: np.ndarray,
+                             y_field: np.ndarray,
+                             max_lag_cap: int = 60) -> np.ndarray:
+    """
+    Vectorized effective sample size for PAIRED pointwise series, where the
+    predictor varies by pixel too (e.g. local SST' vs local precip' at the
+    same grid point) — unlike calculate_neff_vectorized, which assumes one
+    shared 1D predictor regressed against many pixels.
+
+    1/Ne = 1/N + (2/N) Σ_{j=1..L} (N-j)/N * rho_xx(j, pixel) * rho_yy(j, pixel)
+
+    Inputs
+    ------
+    x_field, y_field : (time, space) 2D arrays, same shape.
+    max_lag_cap : int, cap on summation range for memory efficiency (default 60).
+
+    Returns
+    -------
+    Ne : (space,) array, clipped to [2, N]. NaN where variance is zero.
+    """
+    n = x_field.shape[0]
+    if n < 3:
+        return np.full(x_field.shape[1], np.nan)
+
+    max_lag = min(n - 2, max_lag_cap)
+    rho_xx = autocorrelation_numpy_vectorized(x_field, max_lag)
+    rho_yy = autocorrelation_numpy_vectorized(y_field, max_lag)
+
+    sum_term = np.zeros(x_field.shape[1])
+    for j in range(1, max_lag + 1):
+        sum_term += (n - j) / n * rho_xx[j, :] * rho_yy[j, :]
 
     inv_ne = (1.0 / n) + (2.0 / n) * sum_term
     with np.errstate(divide='ignore', invalid='ignore'):

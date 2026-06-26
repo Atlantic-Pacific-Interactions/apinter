@@ -37,7 +37,7 @@ from .cmip6 import (
     load_cmip6_wind,
 )
 from .obs import OBS_SST_SOURCES, load_obs_sst
-from .era5 import ERA5_VARS, load_era5
+from .era5 import ERA5_VARS, load_era5, load_era5_flux
 from .oras5 import (
     ORAS5_VARS,
     load_oras5,
@@ -82,6 +82,7 @@ __all__ = [
     # ERA5 reanalysis
     "ERA5_VARS",
     "load_era5",
+    "load_era5_flux",
     # ORAS5 ocean reanalysis
     "ORAS5_VARS",
     "load_oras5",

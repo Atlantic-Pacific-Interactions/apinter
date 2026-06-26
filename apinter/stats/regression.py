@@ -1,7 +1,11 @@
 """Vectorized grid-point regression and lead-lag correlation between time series.
 
-Canonical entry point: `regression_lags` — handles simple or partial regression at
-one or many lags with effective-DoF significance (Bretherton integral time scale).
+Two canonical entry points, both with effective-DoF significance (Bretherton
+integral time scale):
+  - `regression_lags` — field regressed on a shared 1D index (simple or
+    partial via `confounder`), one or many lags.
+  - `pointwise_regression` — field regressed on another field, pixel-by-pixel
+    (both operands vary spatially; no lag axis).
 """
 import logging
 from typing import Dict, Iterable, Optional
@@ -10,7 +14,7 @@ import numpy as np
 import xarray as xr
 from scipy import stats
 
-from .significance import calculate_neff_vectorized
+from .significance import calculate_neff_vectorized, calculate_neff_pointwise
 
 logger = logging.getLogger(__name__)
 
@@ -23,9 +27,16 @@ def regression_lags(
     compute_significance: bool = True,
     min_samples: int = 10,
     min_overlap_months: int = 24,
+    min_variance: Optional[float] = None,
 ) -> Optional[xr.Dataset]:
     """
     Lead-lag (optionally partial) regression of `field` on `target_index`.
+
+    min_variance, if set, skips a lag entirely when var(target_index) (or
+    var(confounder)) over the valid samples falls below this threshold —
+    guards against a near-constant predictor blowing up the regression slope
+    (e.g. a degenerate index window). Since target_index/confounder are 1D
+    (shared across all pixels), this is a per-lag gate, not a per-pixel mask.
 
     For each lag in `lags` (months; notebook 34 convention):
         lag < 0: target_index leads field by |lag| months
@@ -108,6 +119,12 @@ def regression_lags(
         x1_final = x1_run[valid]
         y_final = y_run[valid, :]
         n_samples = len(x1_final)
+
+        if min_variance is not None:
+            if np.var(x1_final) <= min_variance:
+                continue
+            if x2_run is not None and np.var(x2_run[valid]) <= min_variance:
+                continue
 
         if x2_run is not None:
             x2_final = x2_run[valid]
@@ -279,3 +296,89 @@ def mmm_correlation_lags(per_model_results: Dict[str, xr.Dataset],
         'p_mean': stacked_p.mean('model'),
         'n_models': xr.DataArray(len(included)),
     })
+
+
+def pointwise_regression(
+    x_field: xr.DataArray,
+    y_field: xr.DataArray,
+    compute_significance: bool = True,
+    min_variance: Optional[float] = None,
+    min_samples: int = 10,
+) -> xr.Dataset:
+    """
+    Grid-cell-local ("pointwise") regression of `y_field` on `x_field`: each
+    spatial pixel's slope uses only that pixel's own (x(t), y(t)) pair — e.g.
+    a local moisture-budget term anomaly regressed on the LOCAL SST anomaly at
+    the same grid point. Unlike `regression_lags` (one shared 1D index vs a
+    spatial field), here BOTH operands vary spatially; there is no lag axis.
+
+        beta(pixel) = cov(x, y)(pixel) / var(x)(pixel)
+
+    Significance uses the Bretherton/Pyper-Peterman effective-DOF t-test via
+    `calculate_neff_pointwise`, computed independently per pixel from that
+    pixel's own x/y autocorrelation — NOT a nominal-DOF (n-2) t-test.
+
+    Parameters
+    ----------
+    x_field, y_field : xr.DataArray (time, *spatial_dims)
+        Must share the same spatial grid. Time-aligned via inner join; caller
+        is responsible for any time-coordinate standardization (e.g.
+        `apinter.processing.standardize_time_to_month_start`) beforehand.
+    compute_significance : bool
+    min_variance : float, optional
+        Pixels with var(x) at or below this threshold are masked to NaN —
+        guards against near-zero-variance artifacts (e.g. CMIP6 regrid-seam
+        cells at the lon=0/360 boundary).
+    min_samples : int
+        Minimum valid (non-NaN at that pixel) time samples required.
+
+    Returns
+    -------
+    xr.Dataset over the shared spatial dims. Variables: `beta`, and `p_value`
+    if `compute_significance`.
+    """
+    x_field, y_field = xr.align(x_field, y_field, join='inner')
+
+    spatial_dims = tuple(d for d in y_field.dims if d != 'time')
+    spatial_shape = tuple(y_field.sizes[d] for d in spatial_dims)
+    spatial_flat = int(np.prod(spatial_shape)) if spatial_shape else 1
+
+    x = x_field.values.reshape(x_field.shape[0], spatial_flat)
+    y = y_field.values.reshape(y_field.shape[0], spatial_flat)
+
+    x_mean = np.nanmean(x, axis=0)
+    y_mean = np.nanmean(y, axis=0)
+    x_dev = x - x_mean
+    y_dev = y - y_mean
+
+    cov_xy = np.nanmean(x_dev * y_dev, axis=0)
+    var_x = np.nanmean(x_dev ** 2, axis=0)
+    n_valid = np.sum(~np.isnan(x) & ~np.isnan(y), axis=0)
+
+    valid_pixel = n_valid >= min_samples
+    if min_variance is not None:
+        valid_pixel = valid_pixel & (var_x > min_variance)
+
+    with np.errstate(divide='ignore', invalid='ignore'):
+        beta = np.where(valid_pixel & (var_x > 0), cov_xy / var_x, np.nan)
+
+    coords = {d: y_field[d] for d in spatial_dims}
+    ds_vars = {'beta': (spatial_dims, beta.reshape(spatial_shape))}
+
+    if compute_significance:
+        with np.errstate(divide='ignore', invalid='ignore'):
+            y_pred = x * beta
+            residuals = y - y_pred
+            ssr = np.nansum(residuals ** 2, axis=0)
+            mse = ssr / np.maximum(n_valid - 2, 1)
+            se_nom = np.sqrt(mse / (var_x * n_valid))
+
+            neff = calculate_neff_pointwise(x, y)
+            se_eff = se_nom * np.sqrt(n_valid / neff)
+            t_stat = np.abs(beta) / np.where(se_eff > 0, se_eff, np.nan)
+            dof_eff = np.maximum(neff - 2, 1)
+            pval = 2 * (1 - stats.t.cdf(np.abs(t_stat), df=dof_eff))
+        pval = np.where(valid_pixel, pval, np.nan)
+        ds_vars['p_value'] = (spatial_dims, pval.reshape(spatial_shape))
+
+    return xr.Dataset(ds_vars, coords=coords)
