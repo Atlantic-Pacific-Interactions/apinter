@@ -35,14 +35,15 @@ logger = logging.getLogger(__name__)
 #   ext        : 'zarr' or 'nc'
 #   to_celsius : subtract 273.15 from the values (atmospheric temperature)
 #   sst_filter : keep only (-10 < value < 40) — E3SMS/mean_state convention
-#                for `ts`: masks land, sea-ice surfaces, and regridding
-#                artifacts (e.g. spurious 0-K cells) in one step, with no
-#                separate land-sea mask required.
-#   ocean_mask : apply the explicit land-sea mask (for natively ocean-only
-#                variables like `zos`).
+#                for `ts`: removes sea-ice surfaces and regridding artifacts
+#                (e.g. spurious 0-K cells) that survive land masking.
+#                Complements ocean_mask below, does not replace it.
+#   ocean_mask : apply the explicit land-sea mask. Required for `ts` (CLAUDE.md
+#                hard rule: land contaminates SST) and for natively ocean-only
+#                variables like `zos`.
 CMIP6_VARS: Dict[str, Dict] = {
     'ts':     {'subdir': '1850-2015-atmos', 'ext': 'zarr',
-               'to_celsius': True, 'sst_filter': True},
+               'to_celsius': True, 'sst_filter': True, 'ocean_mask': True},
     'wap':    {'subdir': '1850-2015-atmos', 'ext': 'zarr'},
     'zg':     {'subdir': '1850-2015-atmos', 'ext': 'zarr'},
     'psl':    {'subdir': '1850-2015-atmos', 'ext': 'zarr'},
@@ -180,9 +181,11 @@ def load_cmip6(var: str,
             if spec.get('to_celsius'):
                 da = da - 273.15
             if spec.get('sst_filter'):
-                # E3SMS/mean_state convention: filter unphysical SSTs in one
-                # step. Replaces the land mask for `ts` and also removes
-                # regridding artifacts (0-K cells) and sea-ice surface temps.
+                # E3SMS/mean_state convention: removes regridding artifacts
+                # (0-K cells) and sea-ice surface temps that a land mask
+                # alone wouldn't catch. Does NOT replace the land mask below
+                # (CLAUDE.md hard rule: land contaminates SST — many land
+                # cells fall inside -10..40 C too).
                 da = da.where((da > -10) & (da < 40))
             if need_mask:
                 da = da.where(mask == 1)
